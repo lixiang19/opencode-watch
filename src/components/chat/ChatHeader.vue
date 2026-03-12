@@ -26,7 +26,7 @@ function goBack() {
 
     <div class="topbar-title">
       <div class="topbar-session-name">{{ app.activeSession.value?.title || '对话详情' }}</div>
-      <div class="topbar-project-name">{{ app.selectedProjectMeta.value?.name || app.activeSession.value?.directory || '未绑定项目' }}</div>
+      <div class="topbar-project-name">{{ app.activeSession.value?.directory || '未绑定项目' }}</div>
     </div>
 
     <div class="topbar-right">

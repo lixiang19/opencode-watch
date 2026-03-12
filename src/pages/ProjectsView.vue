@@ -1,14 +1,26 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { ArrowRight, FolderOpenDot, MessageCirclePlus } from 'lucide-vue-next'
+import { FolderOpenDot, MessageCirclePlus, FolderSync, Clock } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 
 import Button from '@/components/ui/button/Button.vue'
+import Card from '@/components/ui/card/Card.vue'
 import { formatRelativeTime } from '@/lib/format'
 import { useOpencodeState } from '@/lib/app-context'
 
 const app = useOpencodeState()
 const router = useRouter()
+
+function formatProjectDirectory(directory: string) {
+  const normalized = directory.replace(/\\/g, '/')
+  const segments = normalized.split('/').filter(Boolean)
+
+  if (segments.length <= 2) {
+    return directory
+  }
+
+  return `.../${segments.slice(-2).join('/')}`
+}
 
 const draftProject = computed(() => {
   const directory = app.draftDirectory.value.trim()
@@ -25,14 +37,13 @@ const draftProject = computed(() => {
 
   return {
     directory,
-    name: segments[segments.length - 1] || '临时项目',
+    name: segments[segments.length - 1] || '新项目',
     sessionCount: 0,
     lastUpdated: Date.now()
   }
 })
 
 async function createForProject(directory: string) {
-  app.selectedProject.value = directory
   app.draftDirectory.value = directory
   await app.createSession(directory)
   if (app.selectedSessionId.value) {
@@ -40,262 +51,361 @@ async function createForProject(directory: string) {
   }
 }
 
-function selectProject(directory: string) {
-  app.selectedProject.value = directory
+function useProjectDirectory(directory: string) {
   app.draftDirectory.value = directory
 }
+
+const hasProjects = computed(() => app.projects.value.length > 0 || !!draftProject.value)
 </script>
 
 <template>
-  <section class="page projects-page">
-    <header class="wechat-header">
-      <div class="page-intro">
-        <p class="wechat-overline">工作区</p>
-        <h1 class="wechat-title">项目</h1>
-        <p class="page-copy">用更清晰的项目卡片组织上下文，减少切换时的视觉干扰。</p>
+  <div class="projects-container">
+    <header class="projects-header">
+      <div class="header-title">
+        <h1>项目</h1>
+        <span class="count-badge" v-if="app.projects.value.length">
+          {{ app.projects.value.length }}
+        </span>
       </div>
-      <div class="project-badge">{{ app.projects.value.length }} 个项目</div>
     </header>
 
-    <div class="project-current">
-      <div>
-        <p class="card-kicker">当前项目</p>
-        <h2>{{ app.selectedProjectMeta.value?.name || '还没选项目' }}</h2>
-        <p>{{ app.selectedProject.value || app.draftDirectory.value || '在下面选一个项目，或先去设置输入项目路径。' }}</p>
-      </div>
-    </div>
-
-    <div class="project-list">
-      <article v-if="draftProject" class="project-card project-card-draft">
-        <button type="button" class="project-card-main" @click="selectProject(draftProject.directory)">
-          <div class="project-icon"><FolderOpenDot class="h-5 w-5" /></div>
-          <div class="project-card-content">
-            <h3>{{ draftProject.name }}</h3>
-            <p>{{ draftProject.directory }}</p>
-            <span>来自设置页草稿路径</span>
-          </div>
-        </button>
-        <Button size="sm" class="project-create-btn" :disabled="!app.streamReady.value" @click="createForProject(draftProject.directory)">
-          <MessageCirclePlus class="h-4 w-4" />
-          新建对话
-        </Button>
-      </article>
-
-      <article
-        v-for="project in app.projects.value"
-        :key="project.directory"
-        class="project-card"
-        :class="{ 'project-card-active': app.selectedProject.value === project.directory }"
-      >
-        <button type="button" class="project-card-main" @click="selectProject(project.directory)">
-          <div class="project-icon"><FolderOpenDot class="h-5 w-5" /></div>
-          <div class="project-card-content">
-            <div class="project-card-top">
-              <h3>{{ project.name }}</h3>
-              <ArrowRight class="h-4 w-4" />
+    <main class="projects-content">
+      <div v-if="hasProjects" class="project-grid">
+        <!-- 草稿项目卡片 -->
+        <Card v-if="draftProject" class="project-card draft-card">
+          <div class="card-body" @click="useProjectDirectory(draftProject.directory)">
+            <div class="card-header-row">
+              <div class="project-icon-box draft">
+                {{ draftProject.name.slice(0, 1).toUpperCase() }}
+              </div>
+              <div class="tag-row">
+                <span class="status-tag draft">待载入</span>
+              </div>
             </div>
-            <p>{{ project.directory }}</p>
-            <span>{{ project.sessionCount }} 个对话 · {{ formatRelativeTime(project.lastUpdated) }}</span>
+            
+            <div class="project-details">
+              <h3 class="project-title">{{ draftProject.name }}</h3>
+              <p class="project-path">
+                <FolderSync class="inline-icon" />
+                {{ formatProjectDirectory(draftProject.directory) }}
+              </p>
+            </div>
           </div>
-        </button>
+          <div class="card-footer">
+            <Button 
+              block 
+              class="action-btn"
+              :disabled="!app.streamReady.value"
+              @click.stop="createForProject(draftProject.directory)"
+            >
+              <MessageCirclePlus class="h-4 w-4 mr-2" />
+              开启新对话
+            </Button>
+          </div>
+        </Card>
 
-        <Button size="sm" class="project-create-btn" :disabled="!app.streamReady.value" @click="createForProject(project.directory)">
-          <MessageCirclePlus class="h-4 w-4" />
-          新建对话
-        </Button>
-      </article>
+        <!-- 已有项目卡片 -->
+        <Card 
+          v-for="project in app.projects.value" 
+          :key="project.directory" 
+          class="project-card"
+        >
+          <div class="card-body" @click="useProjectDirectory(project.directory)">
+            <div class="card-header-row">
+              <div class="project-icon-box">
+                {{ project.name.slice(0, 1).toUpperCase() }}
+              </div>
+            </div>
 
-      <div v-if="!app.projects.value.length && !draftProject" class="empty-state">
-        <div class="empty-icon"><FolderOpenDot class="h-6 w-6" /></div>
-        <h2>还没有项目</h2>
-        <p>连接成功后会自动拉取服务端项目，或者先在设置页填一个本地目录。</p>
+            <div class="project-details">
+              <h3 class="project-title">{{ project.name }}</h3>
+              <p class="project-path">
+                {{ formatProjectDirectory(project.directory) }}
+              </p>
+            </div>
+          </div>
+          
+          <div class="card-footer">
+            <div class="meta-info">
+              <span class="meta-item">
+                <Clock class="inline-icon" />
+                {{ formatRelativeTime(project.lastUpdated) }}
+              </span>
+              <span class="meta-divider">•</span>
+              <span class="meta-item">{{ project.sessionCount }} 个对话</span>
+            </div>
+            <Button 
+              variant="outline" 
+              size="sm"
+              class="action-btn-mini"
+              :disabled="!app.streamReady.value"
+              @click.stop="createForProject(project.directory)"
+            >
+              <MessageCirclePlus class="h-4 w-4" />
+              新建对话
+            </Button>
+          </div>
+        </Card>
       </div>
-    </div>
-  </section>
+
+      <!-- 空状态 -->
+      <div v-else class="empty-hero">
+        <div class="hero-icon">
+          <FolderOpenDot class="h-10 w-10" />
+        </div>
+        <h2>欢迎使用 OpenCode</h2>
+        <p>这里将显示您最近活跃的项目。目前还没有发现任何项目。</p>
+        <div class="hero-actions">
+          <Button @click="router.push('/settings')">前往设置配置目录</Button>
+        </div>
+      </div>
+    </main>
+  </div>
 </template>
 
 <style scoped>
-.page {
+.projects-container {
   display: flex;
-  min-height: 100%;
+  flex-direction: column;
+  min-height: 100vh;
+  background: var(--background);
+  color: var(--foreground);
+}
+
+.projects-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1.5rem 1.25rem 1rem;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--background);
+}
+
+.header-title {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+}
+
+.header-title h1 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin: 0;
+  letter-spacing: -0.02em;
+}
+
+.count-badge {
+  font-size: 0.75rem;
+  background: var(--muted);
+  color: var(--muted-foreground);
+  padding: 0.125rem 0.5rem;
+  border-radius: 999px;
+  font-weight: 500;
+}
+
+.projects-content {
+  flex: 1;
+  padding: 0 1rem 2rem;
+}
+
+.project-grid {
+  display: flex;
   flex-direction: column;
   gap: 1rem;
-  padding-top: calc(env(safe-area-inset-top) + 1rem);
+  max-width: 800px;
+  margin: 0 auto;
 }
 
-.wechat-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 0.75rem;
-  flex-wrap: wrap;
-}
-
-.page-intro {
-  max-width: 34rem;
-}
-
-.wechat-overline,
-.card-kicker {
-  margin: 0 0 0.5rem;
-  color: var(--primary);
-  font-size: 0.75rem;
-  font-weight: 700;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-}
-
-.wechat-title {
-  margin: 0;
-  color: var(--foreground);
-  font-size: clamp(2rem, 6vw, 3rem);
-  line-height: 1;
-}
-
-.page-copy,
-.project-current p,
-.project-card p,
-.project-card span,
-.empty-state p {
-  color: var(--muted-foreground);
-}
-
-.page-copy {
-  margin: 0.75rem 0 0;
-  line-height: 1.7;
-}
-
-.project-badge,
-.project-current,
+/* 卡片样式 */
 .project-card {
-  border: 1px solid var(--border);
-  background: var(--card);
-  box-shadow: var(--shadow-lg);
-}
-
-.project-badge {
-  display: inline-flex;
-  min-height: 2.75rem;
-  align-items: center;
-  padding: 0 1rem;
-  border-radius: 999px;
-  color: var(--muted-foreground);
-}
-
-.project-current {
-  padding: 1.25rem;
-  border-radius: 1.5rem;
-}
-
-.project-current h2,
-.project-card h3 {
-  margin: 0;
-  color: var(--foreground);
-}
-
-.project-current p {
-  margin: 0.375rem 0 0;
-  line-height: 1.7;
-}
-
-.project-list {
   display: flex;
   flex-direction: column;
-  gap: 0.875rem;
-}
-
-.project-card {
-  display: grid;
-  gap: 0.875rem;
-  padding: 1rem;
-  border-radius: 1.5rem;
-}
-
-.project-card-active {
-  border-color: color-mix(in srgb, var(--primary) 35%, var(--border));
-}
-
-.project-card-draft {
-  background: color-mix(in srgb, var(--accent) 38%, var(--card));
-}
-
-.project-card-main {
-  display: grid;
-  min-width: 0;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 0.875rem;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  text-align: left;
-}
-
-.project-card-content {
-  min-width: 0;
-}
-
-.project-card-top {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 0.625rem;
-}
-
-.project-card p {
-  margin: 0.375rem 0;
-  line-height: 1.6;
-  word-break: break-word;
-}
-
-.project-card span {
-  font-size: 0.8125rem;
-}
-
-.project-icon,
-.empty-icon {
-  display: grid;
-  width: 3rem;
-  height: 3rem;
-  place-items: center;
   border-radius: 1rem;
+  overflow: hidden;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  border: 1px solid var(--border);
+  background: var(--card);
+  cursor: pointer;
+  position: relative;
+}
+
+.project-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 24px -10px rgba(0,0,0,0.1);
+  border-color: var(--primary);
+}
+
+.draft-card {
+  background: color-mix(in srgb, var(--primary) 5%, var(--card));
+  border-style: dashed;
+}
+
+.card-body {
+  padding: 1.25rem;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+}
+
+.card-header-row {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.project-icon-box {
+  width: 3.5rem;
+  height: 3.5rem;
+  border-radius: 1rem;
+  background: var(--primary);
+  color: var(--primary-foreground);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.5rem;
+  font-weight: 700;
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--primary) 20%, transparent);
+  flex-shrink: 0;
+}
+
+.project-icon-box.draft {
   background: var(--accent);
   color: var(--accent-foreground);
 }
 
-.project-create-btn {
-  width: 100%;
-  justify-content: center;
+.tag-row {
+  display: flex;
+  gap: 0.5rem;
 }
 
-.empty-state {
+.status-tag {
+  font-size: 0.625rem;
+  padding: 0.125rem 0.4rem;
+  border-radius: 4px;
+  font-weight: 600;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.status-tag.draft {
+  background: var(--accent);
+  color: var(--accent-foreground);
+}
+
+.project-details {
+  flex: 1;
+  min-width: 0;
+}
+
+.project-title {
+  font-size: 1.125rem;
+  font-weight: 600;
+  margin: 0 0 0.375rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--foreground);
+}
+
+.project-path {
+  font-size: 0.8125rem;
+  color: var(--muted-foreground);
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  word-break: break-all;
+}
+
+.inline-icon {
+  width: 0.875rem;
+  height: 0.875rem;
+  flex-shrink: 0;
+}
+
+.card-footer {
+  padding: 0.75rem 1.25rem;
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: color-mix(in srgb, var(--muted) 15%, transparent);
+}
+
+.meta-info {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 0.75rem;
+  color: var(--muted-foreground);
+}
+
+.meta-divider {
+  opacity: 0.3;
+}
+
+.meta-item {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+.action-btn {
+  border-radius: 0.5rem;
+  font-weight: 600;
+  width: auto;
+  min-width: 120px;
+}
+
+.action-btn-mini {
+  border-radius: 0.625rem;
+  padding: 0 1rem;
+  height: 2.25rem;
+  font-size: 0.8125rem;
+  gap: 0.5rem;
+}
+
+/* 空状态 */
+.empty-hero {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 0.625rem;
-  padding: 2.5rem 1.5rem;
+  padding: 4rem 2rem;
   text-align: center;
 }
 
-.empty-state h2 {
-  margin: 0;
+.hero-icon {
+  width: 5rem;
+  height: 5rem;
+  background: var(--muted);
+  border-radius: 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 2rem;
+  color: var(--muted-foreground);
 }
 
-.empty-state p {
-  max-width: 18rem;
-  margin: 0;
-  line-height: 1.7;
+.empty-hero h2 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin: 0 0 1rem;
 }
 
-@media (min-width: 640px) {
-  .project-card {
-    grid-template-columns: minmax(0, 1fr) auto;
-    align-items: center;
-  }
+.empty-hero p {
+  color: var(--muted-foreground);
+  max-width: 20rem;
+  margin: 0 0 2rem;
+  line-height: 1.6;
+}
 
-  .project-create-btn {
-    width: auto;
-    min-width: 7.5rem;
-  }
+.hero-actions {
+  display: flex;
+  gap: 1rem;
 }
 </style>

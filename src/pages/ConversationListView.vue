@@ -1,232 +1,341 @@
 <script setup lang="ts">
-import { Wifi, WifiOff } from 'lucide-vue-next'
+import { Wifi, WifiOff, MessageSquare, Clock, Folder, ChevronRight } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 
+import Badge from '@/components/ui/badge/Badge.vue'
+import Button from '@/components/ui/button/Button.vue'
+import Card from '@/components/ui/card/Card.vue'
 import { formatRelativeTime } from '@/lib/format'
 import { useOpencodeState } from '@/lib/app-context'
 
 const app = useOpencodeState()
 const router = useRouter()
 
+function formatSessionDirectory(directory?: string | null) {
+  if (!directory) {
+    return '未绑定项目目录'
+  }
+
+  const normalized = directory.replace(/\\/g, '/')
+  const segments = normalized.split('/').filter(Boolean)
+
+  if (segments.length <= 2) {
+    return directory
+  }
+
+  return `.../${segments.slice(-2).join('/')}`
+}
+
 function openConversation(sessionId: string) {
+  app.clearSessionListBadges(sessionId)
   void router.push({ name: 'session', params: { sessionId } })
 }
 </script>
 
 <template>
-  <section class="page conversations-page">
-    <header class="wechat-header">
-      <div class="page-intro">
-        <p class="wechat-overline">消息中心</p>
-        <h1 class="wechat-title">对话</h1>
-        <p class="page-copy">保持最近上下文触手可达，快速回到每一次协作现场。</p>
-      </div>
-
-      <div class="status-chip" :class="app.streamReady.value ? 'status-chip-online' : 'status-chip-offline'">
-        <Wifi v-if="app.streamReady.value" class="h-4 w-4" />
-        <WifiOff v-else class="h-4 w-4" />
-        <span>{{ app.streamReady.value ? '实时连接' : '等待连接' }}</span>
+  <div class="conversations-container">
+    <header class="conversations-header">
+      <div class="header-title">
+        <h1>我的对话</h1>
+        <span class="count-badge" v-if="app.sessions.value.length">
+          {{ app.sessions.value.length }}
+        </span>
       </div>
     </header>
 
-    <div class="list-panel">
-      <div v-if="!app.sessions.value.length" class="empty-state empty-state-large">
-        <div class="empty-icon">
-          <Wifi v-if="app.streamReady.value" class="h-6 w-6" />
-          <WifiOff v-else class="h-6 w-6" />
-        </div>
-        <h2>{{ app.streamReady.value ? '还没有对话' : '尚未连接服务' }}</h2>
-        <p>{{ app.streamReady.value ? '去项目页选一个项目，然后点“新建对话”。' : '先完成认证并建立连接。' }}</p>
+    <main class="conversations-content">
+      <div v-if="app.sessions.value.length" class="sessions-list">
+        <Card
+          v-for="session in app.sessions.value"
+          :key="session.id"
+          class="session-card"
+          @click="openConversation(session.id)"
+        >
+          <div class="card-body">
+            <div class="session-avatar-box">
+              <div class="avatar-circle">
+                {{ (session.title || session.directory || 'O').slice(0, 1).toUpperCase() }}
+              </div>
+            </div>
+
+            <div class="session-info">
+              <div class="session-top-row">
+                <div class="session-heading">
+                  <h3 class="session-title">{{ session.title || '未命名对话' }}</h3>
+                  <div class="session-badges">
+                    <Badge
+                      v-for="badge in app.getSessionListBadges(session.id)"
+                      :key="badge.key"
+                      :tone="badge.tone"
+                      class="session-badge"
+                    >
+                      {{ badge.label }}
+                    </Badge>
+                  </div>
+                </div>
+                <span class="session-time">
+                  <Clock class="inline-icon" />
+                  {{ formatRelativeTime(session.time.updated || session.time.created) }}
+                </span>
+              </div>
+              
+              <div class="session-meta">
+                <p class="session-path">
+                  <Folder class="inline-icon" />
+                  {{ formatSessionDirectory(session.directory) }}
+                </p>
+              </div>
+            </div>
+
+            <div class="session-action">
+              <ChevronRight class="h-5 w-5 text-muted-foreground opacity-30" />
+            </div>
+          </div>
+        </Card>
       </div>
 
-      <button
-        v-for="session in app.sessions.value"
-        :key="session.id"
-        type="button"
-        class="wechat-row"
-        @click="openConversation(session.id)"
-      >
-        <div class="wechat-avatar">{{ (session.title || session.directory || 'O').slice(0, 1).toUpperCase() }}</div>
-        <div class="wechat-row-body">
-          <div class="wechat-row-top">
-            <strong>{{ session.title || '未命名对话' }}</strong>
-            <span>{{ formatRelativeTime(session.time.updated || session.time.created) }}</span>
-          </div>
-          <div class="wechat-row-bottom">
-            <span>{{ session.directory || '未绑定项目目录' }}</span>
-          </div>
+      <!-- 空状态 -->
+      <div v-else class="empty-hero">
+        <div class="hero-icon">
+          <Wifi v-if="app.streamReady.value" class="h-10 w-10 text-primary" />
+          <WifiOff v-else class="h-10 w-10 text-muted-foreground" />
         </div>
-      </button>
-    </div>
-  </section>
+        <h2>{{ app.streamReady.value ? '还没有对话' : '服务连接已断开' }}</h2>
+        <p>
+          {{ app.streamReady.value 
+            ? '您可以前往项目页选择一个项目并开启新的智能对话。' 
+            : '请检查您的网络连接或在设置页面更新服务配置。' 
+          }}
+        </p>
+        <div class="hero-actions">
+          <Button v-if="app.streamReady.value" @click="router.push('/')">
+            <MessageSquare class="h-4 w-4 mr-2" />
+            浏览项目
+          </Button>
+          <Button v-else variant="outline" @click="router.push('/settings')">
+            检查连接设置
+          </Button>
+        </div>
+      </div>
+    </main>
+  </div>
 </template>
 
 <style scoped>
-.page {
+.conversations-container {
   display: flex;
-  min-height: 100%;
   flex-direction: column;
-  gap: 1rem;
-  padding-top: calc(env(safe-area-inset-top) + 1rem);
+  min-height: 100vh;
+  background: var(--background);
+  color: var(--foreground);
 }
 
-.wechat-header {
+.conversations-header {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 0.75rem;
-  flex-wrap: wrap;
-}
-
-.page-intro {
-  max-width: 34rem;
-}
-
-.wechat-overline {
-  margin: 0 0 0.5rem;
-  color: var(--primary);
-  font-size: 0.75rem;
-  font-weight: 700;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-}
-
-.wechat-title {
-  margin: 0;
-  color: var(--foreground);
-  font-size: clamp(2rem, 6vw, 3rem);
-  line-height: 1;
-}
-
-.page-copy {
-  margin: 0.75rem 0 0;
-  color: var(--muted-foreground);
-  line-height: 1.7;
-}
-
-.status-chip {
-  display: inline-flex;
-  min-height: 2.75rem;
   align-items: center;
-  gap: 0.5rem;
-  align-self: flex-start;
-  padding: 0 1rem;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--card);
+  justify-content: space-between;
+  padding: 1.5rem 1.25rem 1rem;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--background);
+}
+
+.header-title {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+}
+
+.header-title h1 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin: 0;
+  letter-spacing: -0.02em;
+}
+
+.count-badge {
+  font-size: 0.75rem;
+  background: var(--muted);
   color: var(--muted-foreground);
-  box-shadow: var(--shadow-sm);
+  padding: 0.125rem 0.5rem;
+  border-radius: 999px;
+  font-weight: 500;
 }
 
-.status-chip-online {
-  border-color: color-mix(in srgb, var(--primary) 28%, var(--border));
-  color: var(--foreground);
+.conversations-content {
+  flex: 1;
+  padding: 0 1rem 2rem;
 }
 
-.status-chip-offline {
-  border-color: color-mix(in srgb, var(--destructive) 28%, var(--border));
-  color: var(--destructive);
+.sessions-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  max-width: 800px;
+  margin: 0 auto;
 }
 
-.list-panel {
+/* 对话卡片样式 */
+.session-card {
+  border-radius: 1rem;
   overflow: hidden;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   border: 1px solid var(--border);
-  border-radius: 1.5rem;
   background: var(--card);
-  box-shadow: var(--shadow-lg);
+  cursor: pointer;
 }
 
-.wechat-row {
-  display: grid;
-  width: 100%;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 0.875rem;
-  padding: 1rem 1.125rem;
-  border: 0;
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
-  background: transparent;
-  text-align: left;
-  transition: background-color 0.2s ease;
+.session-card:hover {
+  transform: translateY(-1px);
+  background: color-mix(in srgb, var(--accent) 5%, var(--card));
+  border-color: var(--primary);
+  box-shadow: 0 8px 20px -12px rgba(0,0,0,0.1);
 }
 
-.wechat-row:hover {
-  background: color-mix(in srgb, var(--accent) 42%, transparent);
+.card-body {
+  padding: 1.125rem 1.25rem;
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
 }
 
-.wechat-row:last-child {
-  border-bottom: 0;
+.session-avatar-box {
+  flex-shrink: 0;
 }
 
-.wechat-avatar {
-  display: grid;
-  width: 3rem;
-  height: 3rem;
-  place-items: center;
+.avatar-circle {
+  width: 3.25rem;
+  height: 3.25rem;
   border-radius: 1rem;
   background: var(--primary);
   color: var(--primary-foreground);
-  font-weight: 700;
-}
-
-.wechat-row-body {
-  min-width: 0;
-}
-
-.wechat-row-top,
-.wechat-row-bottom {
   display: flex;
-  min-width: 0;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 0.75rem;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.25rem;
+  font-weight: 700;
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--primary) 15%, transparent);
 }
 
-.wechat-row-top strong {
+.session-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.session-top-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.75rem;
+  margin-bottom: 0.375rem;
+}
+
+.session-heading {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.session-title {
+  font-size: 1.0625rem;
+  font-weight: 600;
+  margin: 0;
+  white-space: nowrap;
   overflow: hidden;
+  text-overflow: ellipsis;
   color: var(--foreground);
+}
+
+.session-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+  flex-shrink: 0;
+}
+
+.session-badge {
+  padding: 0.25rem 0.55rem;
+  font-size: 0.625rem;
+  letter-spacing: 0.08em;
+}
+
+.session-time {
+  font-size: 0.75rem;
+  color: var(--muted-foreground);
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex-shrink: 0;
+}
+
+.session-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.session-path {
+  font-size: 0.8125rem;
+  color: var(--muted-foreground);
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.wechat-row-top span,
-.wechat-row-bottom span {
-  color: var(--muted-foreground);
-  font-size: 0.8125rem;
+.inline-icon {
+  width: 0.875rem;
+  height: 0.875rem;
+  flex-shrink: 0;
+  opacity: 0.6;
 }
 
-.wechat-row-bottom {
-  margin-top: 0.375rem;
+.session-action {
+  flex-shrink: 0;
+  margin-left: 0.5rem;
 }
 
-.empty-state {
+/* 空状态 */
+.empty-hero {
   display: flex;
-  min-height: 50vh;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 0.625rem;
-  padding: 2.5rem 1.5rem;
+  padding: 6rem 2rem;
   text-align: center;
 }
 
-.empty-icon {
-  display: grid;
-  width: 3rem;
-  height: 3rem;
-  place-items: center;
-  border-radius: 1rem;
-  background: var(--accent);
-  color: var(--accent-foreground);
+.hero-icon {
+  width: 5rem;
+  height: 5rem;
+  background: var(--muted);
+  border-radius: 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 2rem;
 }
 
-.empty-state h2 {
-  margin: 0;
+.empty-hero h2 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin: 0 0 1rem;
 }
 
-.empty-state p {
-  max-width: 18rem;
-  margin: 0;
+.empty-hero p {
   color: var(--muted-foreground);
-  line-height: 1.7;
+  max-width: 20rem;
+  margin: 0 0 2.5rem;
+  line-height: 1.6;
+}
+
+.hero-actions {
+  display: flex;
+  gap: 1rem;
 }
 </style>

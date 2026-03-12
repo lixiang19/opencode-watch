@@ -49,6 +49,7 @@ const activeTab = computed(() => {
 
 <style scoped>
 .shell-root {
+  --tabbar-height: calc(4.5rem + env(safe-area-inset-bottom));
   min-height: 100vh;
   display: flex;
   flex-direction: column;
@@ -61,30 +62,28 @@ const activeTab = computed(() => {
   flex: 1;
   min-height: 0;
   display: flex;
-  justify-content: center;
-  padding: 0 0.875rem;
+  min-height: calc(100vh - var(--tabbar-height));
 }
 
 .shell-content {
-  width: min(100%, 62rem);
-  min-height: 100%;
-  padding-bottom: calc(5.5rem + env(safe-area-inset-bottom));
+  width: 100%;
+  min-height: calc(100vh - var(--tabbar-height));
+  padding-bottom: var(--tabbar-height);
 }
 
 .tabbar {
   position: fixed;
-  left: 50%;
-  bottom: max(0.875rem, env(safe-area-inset-bottom));
+  right: 0;
+  bottom: 0;
+  left: 0;
   z-index: 40;
   display: grid;
-  width: min(62rem, calc(100vw - 1.5rem));
+  width: 100%;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.5rem;
-  padding: 0.5rem;
-  transform: translateX(-50%);
-  border: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
-  border-radius: 1.5rem;
-  background: color-mix(in srgb, var(--card) 88%, transparent);
+  padding: 0.5rem 1rem calc(0.5rem + env(safe-area-inset-bottom));
+  border-top: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
+  background: color-mix(in srgb, var(--card) 94%, transparent);
   box-shadow: var(--shadow-xl);
   backdrop-filter: blur(18px);
 }
@@ -112,12 +111,9 @@ const activeTab = computed(() => {
 }
 
 @media (min-width: 768px) {
-  .shell-main {
-    padding: 1.25rem 1.5rem 1.75rem;
-  }
-
   .tabbar {
-    width: min(54rem, calc(100vw - 2.5rem));
+    padding-right: 1.5rem;
+    padding-left: 1.5rem;
   }
 }
 </style>
