@@ -13,7 +13,7 @@ const props = withDefaults(
 )
 
 const classes = computed(() =>
-  cn('rounded-[1.75rem] border border-white/70 bg-white/82 text-card-foreground shadow-[0_18px_40px_rgba(148,163,184,0.18)] backdrop-blur-xl', props.class)
+  cn('rounded-[1.75rem] border border-[var(--border)] bg-[var(--card)] text-[var(--card-foreground)] shadow-[var(--shadow-lg)]', props.class)
 )
 </script>
 

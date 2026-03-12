@@ -8,9 +8,7 @@ import {
 } from '@opencode-ai/sdk/v2/client'
 
 import {
-  readSessionStorage,
   readStorage,
-  writeSessionStorage,
   writeStorage
 } from '@/lib/storage'
 import type {
@@ -21,14 +19,13 @@ import type {
 } from '@/types/opencode'
 
 const STORAGE_KEYS = {
-  serverUrl: 'opencode-mobile-web-chat.server-url',
-  username: 'opencode-mobile-web-chat.username',
-  password: 'opencode-mobile-web-chat.password',
   selectedProject: 'opencode-mobile-web-chat.selected-project',
   selectedSession: 'opencode-mobile-web-chat.selected-session',
   draftDirectory: 'opencode-mobile-web-chat.draft-directory',
   composerMode: 'opencode-mobile-web-chat.composer-mode'
 }
+
+const OPENCODE_SERVER_URL = 'http://127.0.0.1:4096'
 
 type OpencodeClient = ReturnType<typeof createOpencodeClient>
 type MessageHistoryItem = { info: Message; parts: Part[] }
@@ -85,9 +82,13 @@ function getEventSessionId(event: Event) {
   return properties.sessionID || properties.info?.sessionID || properties.part?.sessionID || ''
 }
 
+function isUnauthorizedError(error: unknown) {
+  return error instanceof Error && (error.message.includes('Unauthorized') || error.message.includes('401'))
+}
+
 function parseError(error: unknown) {
   if (error instanceof Error && error.message) {
-    if (error.message.includes('Unauthorized') || error.message.includes('401')) {
+    if (isUnauthorizedError(error)) {
       return '连接被拒绝：这个 opencode server 开启了 Basic Auth，请填写用户名和密码。'
     }
 
@@ -98,9 +99,8 @@ function parseError(error: unknown) {
 }
 
 export function useOpencodeApp() {
-  const serverUrl = ref(readStorage(STORAGE_KEYS.serverUrl, 'http://127.0.0.1:4096'))
-  const username = ref(readStorage(STORAGE_KEYS.username, 'opencode'))
-  const password = ref(readSessionStorage(STORAGE_KEYS.password, ''))
+  const username = ref('')
+  const password = ref('')
   const selectedProject = ref(readStorage(STORAGE_KEYS.selectedProject, ''))
   const selectedSessionId = ref(readStorage(STORAGE_KEYS.selectedSession, ''))
   const draftDirectory = ref(readStorage(STORAGE_KEYS.draftDirectory, ''))
@@ -118,9 +118,20 @@ export function useOpencodeApp() {
   const sessionStatus = ref<'idle' | 'busy'>('idle')
   const lastError = ref('')
   const streamReady = ref(false)
+  const authValidated = ref(false)
 
   let client: OpencodeClient | null = null
   let closeStream: (() => void) | null = null
+
+  const hasAuthCredentials = computed(() => Boolean(username.value.trim()) && Boolean(password.value.trim()))
+  const authGateVisible = computed(() => !authValidated.value)
+  const authGateMessage = computed(() => {
+    if (!hasAuthCredentials.value) {
+      return '当前服务已开启认证，必须先填写账号和密码。'
+    }
+
+    return lastError.value || '请输入可用的认证信息并完成连接验证。'
+  })
 
   const activeSession = computed(() =>
     sessions.value.find((session) => session.id === selectedSessionId.value) ?? null
@@ -209,14 +220,32 @@ export function useOpencodeApp() {
     () => normalizeDirectory(selectedProject.value || activeSession.value?.directory || draftDirectory.value)
   )
 
+  function invalidateAuth() {
+    authValidated.value = false
+    streamReady.value = false
+    closeStream?.()
+    closeStream = null
+    client = null
+  }
+
+  function handleRequestError(error: unknown) {
+    lastError.value = parseError(error)
+
+    if (isUnauthorizedError(error)) {
+      invalidateAuth()
+    }
+  }
+
   function getClient() {
     if (!client) {
-      const authHeader = password.value
-        ? `Basic ${window.btoa(`${username.value}:${password.value}`)}`
+      const trimmedUsername = username.value.trim()
+      const trimmedPassword = password.value.trim()
+      const authHeader = trimmedUsername && trimmedPassword
+        ? `Basic ${window.btoa(`${trimmedUsername}:${trimmedPassword}`)}`
         : undefined
 
       client = createOpencodeClient({
-        baseUrl: serverUrl.value,
+        baseUrl: OPENCODE_SERVER_URL,
         headers: authHeader
           ? {
               Authorization: authHeader
@@ -251,7 +280,7 @@ export function useOpencodeApp() {
           handleEvent(event as Event)
         }
       } catch (error) {
-        lastError.value = parseError(error)
+        handleRequestError(error)
         streamReady.value = false
       }
     })()
@@ -302,6 +331,12 @@ export function useOpencodeApp() {
   }
 
   async function connect() {
+    if (!hasAuthCredentials.value) {
+      lastError.value = '请先填写认证账号和密码。'
+      invalidateAuth()
+      return false
+    }
+
     isConnecting.value = true
     lastError.value = ''
     client = null
@@ -311,9 +346,12 @@ export function useOpencodeApp() {
       await currentClient.global.health()
       await startEventStream()
       await refreshSessions()
+      authValidated.value = true
+      return true
     } catch (error) {
-      lastError.value = parseError(error)
+      handleRequestError(error)
       streamReady.value = false
+      return false
     } finally {
       isConnecting.value = false
     }
@@ -341,7 +379,7 @@ export function useOpencodeApp() {
       messages.value = ((history ?? []) as MessageHistoryItem[]).map(convertHistoryMessage)
       sessionStatus.value = 'idle'
     } catch (error) {
-      lastError.value = parseError(error)
+      handleRequestError(error)
     } finally {
       isLoadingSession.value = false
     }
@@ -368,7 +406,7 @@ export function useOpencodeApp() {
       await refreshSessions({ reopen: false })
       await openSession(session.id)
     } catch (error) {
-      lastError.value = parseError(error)
+      handleRequestError(error)
     }
   }
 
@@ -414,7 +452,7 @@ export function useOpencodeApp() {
 
       composerText.value = ''
     } catch (error) {
-      lastError.value = parseError(error)
+      handleRequestError(error)
       isSending.value = false
       sessionStatus.value = 'idle'
     }
@@ -470,9 +508,14 @@ export function useOpencodeApp() {
     }
   }
 
-  watch(serverUrl, (value) => writeStorage(STORAGE_KEYS.serverUrl, value))
-  watch(username, (value) => writeStorage(STORAGE_KEYS.username, value))
-  watch(password, (value) => writeSessionStorage(STORAGE_KEYS.password, value))
+  watch([username, password], ([nextUsername, nextPassword], [prevUsername, prevPassword]) => {
+    if (nextUsername === prevUsername && nextPassword === prevPassword) {
+      return
+    }
+
+    invalidateAuth()
+    lastError.value = ''
+  })
   watch(selectedProject, async (value) => {
     writeStorage(STORAGE_KEYS.selectedProject, value)
 
@@ -500,9 +543,11 @@ export function useOpencodeApp() {
   })
 
   return {
-    serverUrl,
     username,
     password,
+    hasAuthCredentials,
+    authGateVisible,
+    authGateMessage,
     selectedProject,
     selectedProjectMeta,
     selectedSessionId,
@@ -521,6 +566,7 @@ export function useOpencodeApp() {
     sessionStatus,
     lastError,
     streamReady,
+    authValidated,
     connectionStateLabel,
     canCreateSession,
     connect,

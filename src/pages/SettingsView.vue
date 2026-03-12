@@ -14,9 +14,10 @@ const connectionTone = computed(() => (app.streamReady.value ? 'settings-state-o
 <template>
   <section class="page settings-page">
     <header class="wechat-header">
-      <div>
+      <div class="page-intro">
         <p class="wechat-overline">连接中心</p>
         <h1 class="wechat-title">设置</h1>
+        <p class="page-copy">统一管理服务连接与默认路径，让界面保持轻盈且可预测。</p>
       </div>
     </header>
 
@@ -33,19 +34,21 @@ const connectionTone = computed(() => (app.streamReady.value ? 'settings-state-o
 
     <div class="settings-form">
       <label class="settings-field">
-        <span>服务地址</span>
-        <Input v-model="app.serverUrl.value" placeholder="http://127.0.0.1:4096" />
+        <span>认证账号</span>
+        <Input v-model="app.username.value" placeholder="请输入账号" autocomplete="username" />
       </label>
 
       <label class="settings-field">
-        <span>用户名</span>
-        <Input v-model="app.username.value" placeholder="opencode" />
+        <span>认证密码</span>
+        <Input
+          v-model="app.password.value"
+          type="password"
+          placeholder="请输入密码"
+          autocomplete="current-password"
+        />
       </label>
 
-      <label class="settings-field">
-        <span>密码</span>
-        <Input v-model="app.password.value" type="password" placeholder="留空则不认证" />
-      </label>
+      <p class="settings-hint">账号密码不再预填；清空后会重新弹出认证窗口。</p>
 
       <label class="settings-field">
         <span>默认项目路径</span>
@@ -68,3 +71,144 @@ const connectionTone = computed(() => (app.streamReady.value ? 'settings-state-o
     <p v-if="app.lastError.value" class="settings-error">{{ app.lastError.value }}</p>
   </section>
 </template>
+
+<style scoped>
+.page {
+  display: flex;
+  min-height: 100%;
+  flex-direction: column;
+  gap: 1rem;
+  padding-top: calc(env(safe-area-inset-top) + 1rem);
+}
+
+.wechat-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.page-intro {
+  max-width: 34rem;
+}
+
+.wechat-overline {
+  margin: 0 0 0.5rem;
+  color: var(--primary);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.wechat-title {
+  margin: 0;
+  color: var(--foreground);
+  font-size: clamp(2rem, 6vw, 3rem);
+  line-height: 1;
+}
+
+.page-copy,
+.settings-field span,
+.settings-hint {
+  color: var(--muted-foreground);
+}
+
+.page-copy {
+  margin: 0.75rem 0 0;
+  line-height: 1.7;
+}
+
+.settings-state,
+.settings-form,
+.settings-error {
+  border: 1px solid var(--border);
+  border-radius: 1.5rem;
+  background: var(--card);
+  box-shadow: var(--shadow-lg);
+}
+
+.settings-state {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.875rem;
+  padding: 1.25rem;
+}
+
+.settings-state-ok {
+  border-color: color-mix(in srgb, var(--primary) 35%, var(--border));
+}
+
+.settings-state-off {
+  border-color: color-mix(in srgb, var(--destructive) 32%, var(--border));
+}
+
+.settings-state-icon {
+  display: grid;
+  width: 3rem;
+  height: 3rem;
+  place-items: center;
+  border-radius: 1rem;
+  background: var(--accent);
+  color: var(--accent-foreground);
+}
+
+.settings-state strong {
+  color: var(--foreground);
+}
+
+.settings-state p {
+  margin: 0.375rem 0 0;
+  color: var(--muted-foreground);
+  line-height: 1.7;
+}
+
+.settings-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+  padding: 1.25rem;
+}
+
+.settings-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.settings-field span {
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.settings-hint {
+  margin: 0;
+  line-height: 1.7;
+}
+
+.settings-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.settings-button {
+  width: 100%;
+}
+
+.settings-error {
+  margin: 0;
+  padding: 1rem 1.125rem;
+  border-color: color-mix(in srgb, var(--destructive) 40%, var(--border));
+  color: var(--destructive);
+}
+
+@media (max-width: 640px) {
+  .settings-actions {
+    grid-template-columns: 1fr;
+  }
+}
+</style>

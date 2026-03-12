@@ -49,9 +49,10 @@ function selectProject(directory: string) {
 <template>
   <section class="page projects-page">
     <header class="wechat-header">
-      <div>
+      <div class="page-intro">
         <p class="wechat-overline">工作区</p>
         <h1 class="wechat-title">项目</h1>
+        <p class="page-copy">用更清晰的项目卡片组织上下文，减少切换时的视觉干扰。</p>
       </div>
       <div class="project-badge">{{ app.projects.value.length }} 个项目</div>
     </header>
@@ -68,7 +69,7 @@ function selectProject(directory: string) {
       <article v-if="draftProject" class="project-card project-card-draft">
         <button type="button" class="project-card-main" @click="selectProject(draftProject.directory)">
           <div class="project-icon"><FolderOpenDot class="h-5 w-5" /></div>
-          <div>
+          <div class="project-card-content">
             <h3>{{ draftProject.name }}</h3>
             <p>{{ draftProject.directory }}</p>
             <span>来自设置页草稿路径</span>
@@ -88,7 +89,7 @@ function selectProject(directory: string) {
       >
         <button type="button" class="project-card-main" @click="selectProject(project.directory)">
           <div class="project-icon"><FolderOpenDot class="h-5 w-5" /></div>
-          <div>
+          <div class="project-card-content">
             <div class="project-card-top">
               <h3>{{ project.name }}</h3>
               <ArrowRight class="h-4 w-4" />
@@ -112,3 +113,189 @@ function selectProject(directory: string) {
     </div>
   </section>
 </template>
+
+<style scoped>
+.page {
+  display: flex;
+  min-height: 100%;
+  flex-direction: column;
+  gap: 1rem;
+  padding-top: calc(env(safe-area-inset-top) + 1rem);
+}
+
+.wechat-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.page-intro {
+  max-width: 34rem;
+}
+
+.wechat-overline,
+.card-kicker {
+  margin: 0 0 0.5rem;
+  color: var(--primary);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.wechat-title {
+  margin: 0;
+  color: var(--foreground);
+  font-size: clamp(2rem, 6vw, 3rem);
+  line-height: 1;
+}
+
+.page-copy,
+.project-current p,
+.project-card p,
+.project-card span,
+.empty-state p {
+  color: var(--muted-foreground);
+}
+
+.page-copy {
+  margin: 0.75rem 0 0;
+  line-height: 1.7;
+}
+
+.project-badge,
+.project-current,
+.project-card {
+  border: 1px solid var(--border);
+  background: var(--card);
+  box-shadow: var(--shadow-lg);
+}
+
+.project-badge {
+  display: inline-flex;
+  min-height: 2.75rem;
+  align-items: center;
+  padding: 0 1rem;
+  border-radius: 999px;
+  color: var(--muted-foreground);
+}
+
+.project-current {
+  padding: 1.25rem;
+  border-radius: 1.5rem;
+}
+
+.project-current h2,
+.project-card h3 {
+  margin: 0;
+  color: var(--foreground);
+}
+
+.project-current p {
+  margin: 0.375rem 0 0;
+  line-height: 1.7;
+}
+
+.project-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+}
+
+.project-card {
+  display: grid;
+  gap: 0.875rem;
+  padding: 1rem;
+  border-radius: 1.5rem;
+}
+
+.project-card-active {
+  border-color: color-mix(in srgb, var(--primary) 35%, var(--border));
+}
+
+.project-card-draft {
+  background: color-mix(in srgb, var(--accent) 38%, var(--card));
+}
+
+.project-card-main {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.875rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+
+.project-card-content {
+  min-width: 0;
+}
+
+.project-card-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.625rem;
+}
+
+.project-card p {
+  margin: 0.375rem 0;
+  line-height: 1.6;
+  word-break: break-word;
+}
+
+.project-card span {
+  font-size: 0.8125rem;
+}
+
+.project-icon,
+.empty-icon {
+  display: grid;
+  width: 3rem;
+  height: 3rem;
+  place-items: center;
+  border-radius: 1rem;
+  background: var(--accent);
+  color: var(--accent-foreground);
+}
+
+.project-create-btn {
+  width: 100%;
+  justify-content: center;
+}
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.625rem;
+  padding: 2.5rem 1.5rem;
+  text-align: center;
+}
+
+.empty-state h2 {
+  margin: 0;
+}
+
+.empty-state p {
+  max-width: 18rem;
+  margin: 0;
+  line-height: 1.7;
+}
+
+@media (min-width: 640px) {
+  .project-card {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+  }
+
+  .project-create-btn {
+    width: auto;
+    min-width: 7.5rem;
+  }
+}
+</style>

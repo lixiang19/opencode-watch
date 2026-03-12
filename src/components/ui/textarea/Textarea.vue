@@ -21,7 +21,7 @@ const emit = defineEmits<{
 const attrs = useAttrs()
 const classes = computed(() =>
   cn(
-    'flex min-h-28 w-full rounded-[1.5rem] border border-white bg-white/96 px-4 py-4 text-[15px] text-slate-950 shadow-[inset_0_1px_0_rgba(255,255,255,0.7)] transition placeholder:text-slate-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-950/15',
+    'flex min-h-28 w-full rounded-[1.5rem] border border-[var(--input)] bg-[var(--background)] px-4 py-4 text-[15px] text-[var(--foreground)] shadow-[var(--shadow-sm)] transition placeholder:text-[var(--muted-foreground)] focus-visible:border-[var(--ring)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--ring)_20%,transparent)]',
     props.class,
     attrs.disabled ? 'cursor-not-allowed opacity-50' : ''
   )

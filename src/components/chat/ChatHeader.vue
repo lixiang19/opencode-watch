@@ -38,3 +38,68 @@ function goBack() {
     </div>
   </header>
 </template>
+
+<style scoped>
+.chat-topbar {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.75rem;
+  padding: calc(env(safe-area-inset-top) + 1rem) 1rem 0.875rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--card);
+}
+
+.btn-icon {
+  display: grid;
+  width: 2.75rem;
+  height: 2.75rem;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 1rem;
+  background: var(--secondary);
+  color: var(--secondary-foreground);
+}
+
+.topbar-title {
+  min-width: 0;
+}
+
+.topbar-session-name {
+  overflow: hidden;
+  color: var(--foreground);
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.topbar-project-name {
+  overflow: hidden;
+  margin-top: 0.25rem;
+  color: var(--muted-foreground);
+  font-size: 0.8125rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.connection-dot {
+  width: 0.625rem;
+  height: 0.625rem;
+  border-radius: 999px;
+}
+
+.dot-connected {
+  background: var(--primary);
+}
+
+.dot-disconnected {
+  background: var(--muted-foreground);
+  opacity: 0.45;
+}
+</style>
