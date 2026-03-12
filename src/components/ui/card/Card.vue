@@ -13,7 +13,7 @@ const props = withDefaults(
 )
 
 const classes = computed(() =>
-  cn('panel-grain rounded-[1.4rem] border border-border/90 bg-card/85 text-card-foreground shadow-panel shadow-inset backdrop-blur', props.class)
+  cn('rounded-[1.75rem] border border-white/70 bg-white/82 text-card-foreground shadow-[0_18px_40px_rgba(148,163,184,0.18)] backdrop-blur-xl', props.class)
 )
 </script>
 

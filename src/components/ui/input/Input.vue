@@ -21,7 +21,7 @@ const emit = defineEmits<{
 const attrs = useAttrs()
 const classes = computed(() =>
   cn(
-    'flex min-h-28 w-full rounded-xl border border-input bg-white/80 px-3 py-3 text-sm text-foreground shadow-sm transition placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+    'flex h-12 w-full rounded-2xl border border-white bg-white/90 px-4 py-3 text-sm text-slate-950 shadow-[inset_0_1px_0_rgba(255,255,255,0.7)] transition placeholder:text-slate-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-950/15',
     props.class,
     attrs.disabled ? 'cursor-not-allowed opacity-50' : ''
   )
@@ -29,10 +29,10 @@ const classes = computed(() =>
 </script>
 
 <template>
-  <textarea
+  <input
     v-bind="attrs"
     :value="modelValue"
     :class="classes"
-    @input="emit('update:modelValue', ($event.target as HTMLTextAreaElement).value)"
+    @input="emit('update:modelValue', ($event.target as HTMLInputElement).value)"
   />
 </template>
