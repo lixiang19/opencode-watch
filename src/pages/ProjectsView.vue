@@ -7,10 +7,10 @@ import Button from '@/components/ui/button/Button.vue'
 import Card from '@/components/ui/card/Card.vue'
 import Input from '@/components/ui/input/Input.vue'
 import { formatRelativeTime } from '@/lib/format'
-import { useOpencodeState } from '@/lib/app-context'
+import { useOpencodeStore } from '@/stores/opencode'
 import type { ProjectRecord } from '@/types/opencode'
 
-const app = useOpencodeState()
+const app = useOpencodeStore()
 const router = useRouter()
 
 const ICON_COLOR_OPTIONS = [
@@ -157,12 +157,12 @@ async function saveProjectIcon() {
 }
 
 const draftProject = computed(() => {
-  const directory = app.draftDirectory.value.trim()
+  const directory = app.draftDirectory.trim()
   if (!directory) {
     return null
   }
 
-  const exists = app.projects.value.some((project) => project.directory === directory)
+  const exists = app.projects.some((project) => project.directory === directory)
   if (exists) {
     return null
   }
@@ -178,18 +178,18 @@ const draftProject = computed(() => {
 })
 
 async function createForProject(directory: string) {
-  app.draftDirectory.value = directory
+  app.draftDirectory = directory
   await app.createSession(directory)
-  if (app.selectedSessionId.value) {
-    void router.push({ name: 'session', params: { sessionId: app.selectedSessionId.value } })
+  if (app.selectedSessionId) {
+    void router.push({ name: 'session', params: { sessionId: app.selectedSessionId } })
   }
 }
 
 function useProjectDirectory(directory: string) {
-  app.draftDirectory.value = directory
+  app.draftDirectory = directory
 }
 
-const hasProjects = computed(() => app.projects.value.length > 0 || !!draftProject.value)
+const hasProjects = computed(() => app.projects.length > 0 || !!draftProject.value)
 const editingPreviewIcon = computed(() => iconOverrideDraft.value || editingProject.value?.icon?.url || '')
 </script>
 
@@ -198,8 +198,8 @@ const editingPreviewIcon = computed(() => iconOverrideDraft.value || editingProj
     <header class="projects-header">
       <div class="header-title">
         <h1>项目</h1>
-        <span class="count-badge" v-if="app.projects.value.length">
-          {{ app.projects.value.length }}
+        <span class="count-badge" v-if="app.projects.length">
+          {{ app.projects.length }}
         </span>
       </div>
     </header>
@@ -230,7 +230,7 @@ const editingPreviewIcon = computed(() => iconOverrideDraft.value || editingProj
             <Button 
               block 
               class="action-btn"
-              :disabled="!app.streamReady.value"
+              :disabled="!app.streamReady"
               @click.stop="createForProject(draftProject.directory)"
             >
               <MessageCirclePlus class="h-4 w-4 mr-2" />
@@ -241,7 +241,7 @@ const editingPreviewIcon = computed(() => iconOverrideDraft.value || editingProj
 
         <!-- 已有项目卡片 -->
         <Card 
-          v-for="project in app.projects.value" 
+          v-for="project in app.projects" 
           :key="project.directory" 
           class="project-card"
         >
@@ -249,7 +249,7 @@ const editingPreviewIcon = computed(() => iconOverrideDraft.value || editingProj
             v-if="project.projectId"
             type="button"
             class="project-edit-trigger"
-            :disabled="!app.streamReady.value"
+            :disabled="!app.streamReady"
             @click.stop="openProjectIconEditor(project)"
           >
             <PencilLine class="h-4 w-4" />
@@ -285,7 +285,7 @@ const editingPreviewIcon = computed(() => iconOverrideDraft.value || editingProj
               variant="outline" 
               size="sm"
               class="action-btn-mini"
-              :disabled="!app.streamReady.value"
+              :disabled="!app.streamReady"
               @click.stop="createForProject(project.directory)"
             >
               <MessageCirclePlus class="h-4 w-4" />

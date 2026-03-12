@@ -16,33 +16,33 @@ import {
 import Button from '@/components/ui/button/Button.vue'
 import Input from '@/components/ui/input/Input.vue'
 import Card from '@/components/ui/card/Card.vue'
-import { useOpencodeState } from '@/lib/app-context'
+import { useOpencodeStore } from '@/stores/opencode'
 
-const app = useOpencodeState()
+const app = useOpencodeStore()
 
-const connectionTone = computed(() => (app.streamReady.value ? 'status-ok' : 'status-error'))
+const connectionTone = computed(() => (app.streamReady ? 'status-ok' : 'status-error'))
 const notificationTone = computed(() => {
-  if (!app.notificationSupported.value) {
+  if (!app.notificationSupported) {
     return 'status-muted'
   }
 
-  if (app.notificationsEnabled.value) {
+  if (app.notificationsEnabled) {
     return 'status-ok'
   }
 
-  return app.notificationPermission.value === 'denied' ? 'status-error' : 'status-warn'
+  return app.notificationPermission === 'denied' ? 'status-error' : 'status-warn'
 })
 
 const notificationStatusText = computed(() => {
-  if (!app.notificationSupported.value) {
+  if (!app.notificationSupported) {
     return '当前浏览器不支持通知'
   }
 
-  if (app.notificationsEnabled.value) {
+  if (app.notificationsEnabled) {
     return '已允许后台完成通知'
   }
 
-  if (app.notificationPermission.value === 'denied') {
+  if (app.notificationPermission === 'denied') {
     return '通知权限已被拒绝'
   }
 
@@ -50,15 +50,15 @@ const notificationStatusText = computed(() => {
 })
 
 const notificationHintText = computed(() => {
-  if (!app.notificationSupported.value) {
+  if (!app.notificationSupported) {
     return '请改用支持 Service Worker 和 Notification API 的浏览器。'
   }
 
-  if (app.notificationsEnabled.value) {
+  if (app.notificationsEnabled) {
     return 'AI 完成后，只要页面仍在后台运行，就会弹出系统通知。'
   }
 
-  if (app.notificationPermission.value === 'denied') {
+  if (app.notificationPermission === 'denied') {
     return '请在浏览器站点设置里重新允许通知。'
   }
 
@@ -66,11 +66,11 @@ const notificationHintText = computed(() => {
 })
 
 const installStatusText = computed(() => {
-  if (app.isPwaInstalled.value) {
+  if (app.isPwaInstalled) {
     return '已安装到设备'
   }
 
-  if (app.installAvailable.value) {
+  if (app.installAvailable) {
     return '可直接安装'
   }
 
@@ -93,12 +93,12 @@ const installStatusText = computed(() => {
         <Card class="status-card" :class="connectionTone">
           <div class="card-body">
             <div class="status-icon-box">
-              <ShieldCheck v-if="app.streamReady.value" class="h-6 w-6" />
+              <ShieldCheck v-if="app.streamReady" class="h-6 w-6" />
               <CircleAlert v-else class="h-6 w-6" />
             </div>
             <div class="status-info">
-              <h3>{{ app.connectionStateLabel.value }}</h3>
-              <p>{{ app.streamReady.value ? '服务已就绪，所有功能均可正常使用。' : '连接遇到问题，请检查网络或配置信息。' }}</p>
+              <h3>{{ app.connectionStateLabel }}</h3>
+              <p>{{ app.streamReady ? '服务已就绪，所有功能均可正常使用。' : '连接遇到问题，请检查网络或配置信息。' }}</p>
             </div>
           </div>
         </Card>
@@ -112,12 +112,12 @@ const installStatusText = computed(() => {
             </div>
             <div class="form-group">
               <label>账号</label>
-              <Input v-model="app.username.value" placeholder="请输入账号" autocomplete="username" />
+              <Input v-model="app.username" placeholder="请输入账号" autocomplete="username" />
             </div>
             <div class="form-group">
               <label>密码</label>
               <Input
-                v-model="app.password.value"
+                v-model="app.password"
                 type="password"
                 placeholder="请输入密码"
                 autocomplete="current-password"
@@ -138,19 +138,19 @@ const installStatusText = computed(() => {
             </div>
             <div class="form-group">
               <label>新建对话保存目录</label>
-              <Input v-model="app.draftDirectory.value" placeholder="/Users/name/projects" />
+              <Input v-model="app.draftDirectory" placeholder="/Users/name/projects" />
             </div>
           </div>
 
           <div class="card-footer">
             <div class="action-grid">
-              <Button class="action-btn" :disabled="app.isConnecting.value" @click="app.connect">
-                <Link2 v-if="!app.isConnecting.value" class="h-4 w-4 mr-2" />
+              <Button class="action-btn" :disabled="app.isConnecting" @click="app.connect">
+                <Link2 v-if="!app.isConnecting" class="h-4 w-4 mr-2" />
                 <RefreshCw v-else class="h-4 w-4 mr-2 animate-spin" />
-                {{ app.isConnecting.value ? '连接中' : '测试并连接' }}
+                {{ app.isConnecting ? '连接中' : '测试并连接' }}
               </Button>
-              <Button variant="outline" class="action-btn" :disabled="app.isRefreshing.value" @click="app.refreshSessions({ reopen: false })">
-                <RefreshCw class="h-4 w-4 mr-2" :class="app.isRefreshing.value ? 'animate-spin' : ''" />
+              <Button variant="outline" class="action-btn" :disabled="app.isRefreshing" @click="app.refreshSessions({ reopen: false })">
+                <RefreshCw class="h-4 w-4 mr-2" :class="app.isRefreshing ? 'animate-spin' : ''" />
                 同步数据
               </Button>
             </div>
@@ -158,9 +158,9 @@ const installStatusText = computed(() => {
         </Card>
 
         <Card class="form-card">
-          <div class="form-section">
-            <div class="section-header">
-              <Smartphone class="h-4 w-4" />
+            <div class="form-section">
+              <div class="section-header">
+                <Smartphone class="h-4 w-4" />
               <span>PWA 与通知</span>
             </div>
 
@@ -174,7 +174,7 @@ const installStatusText = computed(() => {
               </div>
             </div>
 
-            <div class="status-tile" :class="app.isPwaInstalled.value ? 'status-ok' : 'status-muted'">
+            <div class="status-tile" :class="app.isPwaInstalled ? 'status-ok' : 'status-muted'">
               <div class="status-tile-icon">
                 <Download class="h-5 w-5" />
               </div>
@@ -187,20 +187,20 @@ const installStatusText = computed(() => {
             <div class="action-grid">
               <Button
                 class="action-btn"
-                :disabled="!app.notificationSupported.value || app.notificationsEnabled.value || app.isRequestingNotificationPermission.value"
+                :disabled="!app.notificationSupported || app.notificationsEnabled || app.isRequestingNotificationPermission"
                 @click="app.requestNotificationPermission"
               >
                 <BellRing class="h-4 w-4 mr-2" />
-                {{ app.notificationsEnabled.value ? '通知已开启' : app.isRequestingNotificationPermission.value ? '请求中' : '开启完成通知' }}
+                {{ app.notificationsEnabled ? '通知已开启' : app.isRequestingNotificationPermission ? '请求中' : '开启完成通知' }}
               </Button>
               <Button
                 variant="outline"
                 class="action-btn"
-                :disabled="app.isPwaInstalled.value || !app.installAvailable.value"
+                :disabled="app.isPwaInstalled || !app.installAvailable"
                 @click="app.promptInstall"
               >
                 <Download class="h-4 w-4 mr-2" />
-                {{ app.isPwaInstalled.value ? '已安装' : app.installAvailable.value ? '安装应用' : '请用浏览器菜单安装' }}
+                {{ app.isPwaInstalled ? '已安装' : app.installAvailable ? '安装应用' : '请用浏览器菜单安装' }}
               </Button>
             </div>
 
@@ -213,12 +213,12 @@ const installStatusText = computed(() => {
 
         <!-- 错误日志 -->
         <transition name="fade">
-          <div v-if="app.lastError.value" class="error-log">
+          <div v-if="app.lastError" class="error-log">
             <div class="error-header">
               <CircleAlert class="h-4 w-4" />
               <span>最近一次错误</span>
             </div>
-            <p>{{ app.lastError.value }}</p>
+            <p>{{ app.lastError }}</p>
           </div>
         </transition>
       </div>

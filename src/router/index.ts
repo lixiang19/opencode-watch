@@ -3,6 +3,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import ChatView from '@/pages/ChatView.vue'
 import ConversationListView from '@/pages/ConversationListView.vue'
+import DesktopWarRoomView from '@/pages/DesktopWarRoomView.vue'
 import ProjectsView from '@/pages/ProjectsView.vue'
 import SettingsView from '@/pages/SettingsView.vue'
 
@@ -35,6 +36,11 @@ export const router = createRouter({
       path: '/conversations/:sessionId',
       name: 'session',
       component: ChatView
+    },
+    {
+      path: '/desktop-war-room',
+      name: 'desktop-war-room',
+      component: DesktopWarRoomView
     }
   ]
 })

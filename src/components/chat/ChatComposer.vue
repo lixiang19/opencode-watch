@@ -1,78 +1,156 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { SendHorizonal, LoaderCircle } from 'lucide-vue-next'
 
-import Select from '@/components/ui/select/Select.vue'
-import { useOpencodeState } from '@/lib/app-context'
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectTrigger,
+  SelectValue
+} from '@/components/ui/select'
+import { useOpencodeStore } from '@/stores/opencode'
 
-const app = useOpencodeState()
+const app = useOpencodeStore()
+const props = withDefaults(
+  defineProps<{
+    sessionId?: string
+    embedded?: boolean
+  }>(),
+  {
+    sessionId: '',
+    embedded: false
+  }
+)
+const DEFAULT_AGENT_VALUE = '__default_agent__'
+const DEFAULT_MODEL_VALUE = '__default_model__'
+const NO_COMMAND_VALUE = '__no_command__'
+const localText = ref('')
 
-const disabled = computed(() => !app.streamReady.value || app.isSending.value)
-const canChooseAgent = computed(() => app.availableAgents.value.length > 0)
-const canChooseModel = computed(() => app.availableModels.value.length > 0)
-const hasCommandOptions = computed(() => app.availableCommands.value.length > 0)
+const disabled = computed(() => !app.streamReady || app.isSending)
+const canChooseAgent = computed(() => app.availableAgents.length > 0)
+const canChooseModel = computed(() => app.availableModels.length > 0)
+const hasCommandOptions = computed(() => app.availableCommands.length > 0)
+const selectedAgentValue = computed(() => app.selectedAgentId || undefined)
+const selectedModelValue = computed(() => app.selectedModelKey || undefined)
+const selectedCommandValue = computed(() => app.selectedCommandName || undefined)
 const commandGroups = computed(() => {
   return [
     {
       label: '系统命令',
-      items: app.availableCommands.value.filter((command) => command.category === 'system')
+      items: app.availableCommands.filter((command) => command.category === 'system')
     },
     {
       label: '自定义命令',
-      items: app.availableCommands.value.filter((command) => command.category === 'custom')
+      items: app.availableCommands.filter((command) => command.category === 'custom')
     },
     {
       label: 'Skill',
-      items: app.availableCommands.value.filter((command) => command.category === 'skill')
+      items: app.availableCommands.filter((command) => command.category === 'skill')
     }
   ].filter((group) => group.items.length > 0)
 })
-const selectedCommandDescription = computed(() => app.selectedCommand.value?.description || '')
+const selectedCommandDescription = computed(() => app.selectedCommand?.description || '')
+
+function handleAgentChange(value: unknown) {
+  app.selectAgent(value === DEFAULT_AGENT_VALUE ? '' : String(value ?? ''))
+}
+
+function handleModelChange(value: unknown) {
+  app.selectModel(value === DEFAULT_MODEL_VALUE ? '' : String(value ?? ''))
+}
+
+function handleCommandChange(value: unknown) {
+  app.selectCommand(value === NO_COMMAND_VALUE ? '' : String(value ?? ''))
+}
+
+const composerValue = computed(() => (props.sessionId ? localText.value : app.composerText))
+
+function handleComposerInput(value: string) {
+  if (props.sessionId) {
+    localText.value = value
+    return
+  }
+
+  app.composerText = value
+}
+
+async function handleSend() {
+  if (props.sessionId) {
+    const text = localText.value.trim()
+    if (!text) {
+      return
+    }
+
+    await app.sendPromptToSession(props.sessionId, text)
+    localText.value = ''
+    return
+  }
+
+  await app.sendCurrentMessage()
+}
 </script>
 
 <template>
-  <footer class="composer">
+  <footer class="composer" :class="{ 'composer-embedded': embedded }">
     <div class="composer-card">
       <div class="composer-meta">
         <div class="composer-selects">
           <Select
             v-if="canChooseAgent"
-            :model-value="app.selectedAgentId.value"
+            :model-value="selectedAgentValue"
             :disabled="disabled"
-            class="composer-select"
-            @change="app.selectAgent(($event.target as HTMLSelectElement).value)"
+            @update:model-value="handleAgentChange"
           >
-            <option v-for="agent in app.availableAgents.value" :key="agent.id" :value="agent.id">
-              {{ agent.id }}
-            </option>
+            <SelectTrigger class="composer-select">
+              <SelectValue placeholder="默认 Agent" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem :value="DEFAULT_AGENT_VALUE">默认 Agent</SelectItem>
+              <SelectItem v-for="agent in app.availableAgents" :key="agent.id" :value="agent.id">
+                {{ agent.id }}
+              </SelectItem>
+            </SelectContent>
           </Select>
           <span v-else class="composer-select-empty">默认 Agent</span>
 
           <Select
             v-if="canChooseModel"
-            :model-value="app.selectedModelKey.value"
+            :model-value="selectedModelValue"
             :disabled="disabled"
-            class="composer-select composer-select-model"
-            @change="app.selectModel(($event.target as HTMLSelectElement).value)"
+            @update:model-value="handleModelChange"
           >
-            <option v-for="model in app.availableModels.value" :key="model.key" :value="model.key">
-              {{ model.providerId }}/{{ model.modelId }}
-            </option>
+            <SelectTrigger class="composer-select composer-select-model">
+              <SelectValue placeholder="默认模型" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem :value="DEFAULT_MODEL_VALUE">默认模型</SelectItem>
+              <SelectItem v-for="model in app.availableModels" :key="model.key" :value="model.key">
+                {{ model.providerId }}/{{ model.modelId }}
+              </SelectItem>
+            </SelectContent>
           </Select>
           <span v-else class="composer-select-empty">默认模型</span>
 
           <Select
-            :model-value="app.selectedCommandName.value"
+            :model-value="selectedCommandValue"
             :disabled="disabled || !hasCommandOptions"
-            class="composer-select composer-select-cmd"
-            @change="app.selectCommand(($event.target as HTMLSelectElement).value)"
+            @update:model-value="handleCommandChange"
           >
-            <option value="">/ 命令</option>
-            <optgroup v-for="group in commandGroups" :key="group.label" :label="group.label">
-              <option v-for="command in group.items" :key="command.name" :value="command.name">
-                /{{ command.name }}{{ command.description ? ` — ${command.description}` : '' }}
-              </option>
-            </optgroup>
+            <SelectTrigger class="composer-select composer-select-cmd">
+              <SelectValue placeholder="/ 命令" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem :value="NO_COMMAND_VALUE">普通消息</SelectItem>
+              <SelectGroup v-for="group in commandGroups" :key="group.label">
+                <SelectLabel>{{ group.label }}</SelectLabel>
+                <SelectItem v-for="command in group.items" :key="command.name" :value="command.name">
+                  /{{ command.name }}
+                </SelectItem>
+              </SelectGroup>
+            </SelectContent>
           </Select>
         </div>
 
@@ -85,22 +163,22 @@ const selectedCommandDescription = computed(() => app.selectedCommand.value?.des
 
       <div class="composer-input-wrap">
         <textarea
-          :value="app.composerText.value"
+          :value="composerValue"
           :disabled="disabled"
           placeholder="发送消息…"
           class="composer-input soft-scrollbar"
           rows="1"
-          @input="app.composerText.value = ($event.target as HTMLTextAreaElement).value"
-          @keydown.ctrl.enter.prevent="app.sendCurrentMessage"
-          @keydown.meta.enter.prevent="app.sendCurrentMessage"
+          @input="handleComposerInput(($event.target as HTMLTextAreaElement).value)"
+          @keydown.ctrl.enter.prevent="handleSend"
+          @keydown.meta.enter.prevent="handleSend"
         />
         <button
           type="button"
           class="btn-send"
-          :disabled="disabled"
-          @click="app.sendCurrentMessage"
+          :disabled="disabled || !composerValue.trim()"
+          @click="handleSend"
         >
-          <LoaderCircle v-if="app.isSending.value" class="h-4 w-4 animate-spin" />
+          <LoaderCircle v-if="app.isSending" class="h-4 w-4 animate-spin" />
           <SendHorizonal v-else class="h-4 w-4" />
         </button>
       </div>
@@ -112,6 +190,10 @@ const selectedCommandDescription = computed(() => app.selectedCommand.value?.des
 .composer {
   padding: 0 0.875rem calc(0.875rem + env(safe-area-inset-bottom));
   background: transparent;
+}
+
+.composer-embedded {
+  padding: 0 0.875rem 0.875rem;
 }
 
 .composer-card {
@@ -248,11 +330,30 @@ const selectedCommandDescription = computed(() => app.selectedCommand.value?.des
     padding: 0 0.625rem calc(0.75rem + env(safe-area-inset-bottom));
   }
 
-  .meta-shortcut {
-    display: none;
+   .composer-meta {
+    flex-direction: column;
+    align-items: stretch;
   }
 
-  .composer-select-model {
+  .composer-selects {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .composer-select,
+  .composer-select-model,
+  .composer-select-cmd,
+  .composer-select-empty {
+    max-width: none;
+    width: 100%;
+  }
+
+  .composer-select-cmd {
+    grid-column: 1 / -1;
+  }
+
+  .meta-shortcut {
     display: none;
   }
 }

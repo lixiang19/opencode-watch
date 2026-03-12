@@ -3,15 +3,12 @@ import { onMounted } from 'vue'
 import { RouterView } from 'vue-router'
 
 import AuthGateDialog from '@/components/auth/AuthGateDialog.vue'
-import { provideOpencodeState } from '@/lib/app-context'
-import { useOpencodeApp } from '@/composables/useOpencodeApp'
+import { useOpencodeStore } from '@/stores/opencode'
 
-const app = useOpencodeApp()
-
-provideOpencodeState(app)
+const app = useOpencodeStore()
 
 onMounted(() => {
-  if (app.hasAuthCredentials.value) {
+  if (app.hasAuthCredentials) {
     void app.connect()
   }
 })

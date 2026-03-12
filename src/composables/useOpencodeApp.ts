@@ -51,10 +51,17 @@ const SESSION_LIST_LIMIT = 20
 const INITIAL_HISTORY_LIMIT = 120
 const HISTORY_LIMIT_STEP = 120
 const SESSION_LIST_REFRESH_DELAY = 240
+const GLOBAL_CHAT_OPTIONS_KEY = '__global__'
 
 type PendingCompletionNotice = {
   sessionId: string
   prompt: string
+}
+
+type ChatOptionsSnapshot = {
+  agents: ChatAgentRecord[]
+  commands: ChatCommandRecord[]
+  models: ChatModelRecord[]
 }
 
 type SessionListFlag = 'isNew' | 'justCompleted'
@@ -386,6 +393,81 @@ function applyQuestionRejected(messages: ChatMessageRecord[], requestId: string)
   current.updatedAt = Date.now()
 }
 
+function applyEventToMessageCollection(messages: ChatMessageRecord[], event: OpencodeEvent) {
+  switch (event.type) {
+    case 'message.updated': {
+      const info = (event.properties as { info: Partial<Message> & { id: string; role?: string } }).info
+      if (info.role === 'user') {
+        ensureChatMessage(messages, info)
+      }
+      break
+    }
+    case 'message.part.updated': {
+      const { part } = event.properties as { part: Part & { text?: string } }
+      if (part.type === 'text') {
+        const current = ensureChatMessage(messages, {
+          id: part.messageID,
+          role: messages.find((item) => item.id === part.messageID)?.role ?? 'assistant'
+        })
+        current.content = part.text ?? current.content
+        current.updatedAt = Date.now()
+        break
+      }
+
+      if (part.type === 'tool') {
+        const current = ensureAssistantMessage(messages, part.messageID)
+        const tools = current.tools ?? []
+        const existing = tools.find((item) => item.id === part.id)
+        const nextTool = {
+          id: part.id,
+          callId: part.callID,
+          name: part.tool,
+          status: getToolStatus(part.state.status),
+          title: 'title' in part.state ? part.state.title : undefined,
+          input: part.state.input
+        }
+
+        if (existing) {
+          Object.assign(existing, nextTool)
+        } else {
+          tools.push(nextTool)
+        }
+
+        current.tools = tools
+        current.updatedAt = Date.now()
+      }
+      break
+    }
+    case 'permission.asked': {
+      applyPermissionAsked(messages, event.properties as PermissionRequest)
+      break
+    }
+    case 'permission.replied': {
+      applyPermissionReplied(messages, event.properties as { sessionID: string; requestID: string; reply: 'once' | 'always' | 'reject' })
+      break
+    }
+    case 'question.asked': {
+      applyQuestionAsked(messages, event.properties as QuestionRequest)
+      break
+    }
+    case 'question.replied': {
+      const { requestID, answers } = event.properties as { requestID: string; answers: QuestionAnswer[] }
+      applyQuestionAnswered(messages, requestID, answers)
+      break
+    }
+    case 'question.rejected': {
+      applyQuestionRejected(messages, (event.properties as { requestID: string }).requestID)
+      break
+    }
+    case 'session.idle':
+    case 'session.error': {
+      return pruneEmptyAssistantMessages(messages)
+    }
+  }
+
+  return messages
+}
+
 function getEventSessionId(event: OpencodeEvent) {
   const properties = event.properties as Record<string, any>
   return properties.sessionID || properties.info?.sessionID || properties.part?.sessionID || ''
@@ -467,6 +549,7 @@ export function useOpencodeApp() {
   const sessions = ref<SessionRecord[]>([])
   const projectCatalog = ref<ProjectCatalogEntry[]>([])
   const messages = ref<ChatMessageRecord[]>([])
+  const sessionPreviewMessages = ref<Record<string, ChatMessageRecord[]>>({})
   const isConnecting = ref(false)
   const isLoadingSession = ref(false)
   const isSending = ref(false)
@@ -492,6 +575,8 @@ export function useOpencodeApp() {
   let sessionListRefreshTimer: ReturnType<typeof window.setTimeout> | null = null
   let sessionListRefreshPending = false
   let sessionListRefreshRunning = false
+  const chatOptionsCache = new Map<string, ChatOptionsSnapshot>()
+  const chatOptionsRequests = new Map<string, Promise<ChatOptionsSnapshot>>()
   const handleDisplayModeChange = () => syncInstalledState()
   const pendingNewSessionIds = new Set<string>()
 
@@ -675,6 +760,13 @@ export function useOpencodeApp() {
     ].filter((badge): badge is { key: 'new' | 'completed'; label: string; tone: 'accent' | 'success' } => Boolean(badge))
   }
 
+  function syncSessionPreviewCache(sessionIds: string[]) {
+    const validIds = new Set(sessionIds)
+    sessionPreviewMessages.value = Object.fromEntries(
+      Object.entries(sessionPreviewMessages.value).filter(([sessionId]) => validIds.has(sessionId))
+    )
+  }
+
   function scheduleSessionListRefresh(options: { newSessionId?: string } = {}) {
     if (options.newSessionId) {
       pendingNewSessionIds.add(options.newSessionId)
@@ -822,6 +914,11 @@ export function useOpencodeApp() {
   function invalidateAuth() {
     authValidated.value = false
     streamReady.value = false
+    chatOptionsCache.clear()
+    chatOptionsRequests.clear()
+    availableAgents.value = []
+    availableCommands.value = []
+    availableModels.value = []
     closeStream?.()
     closeStream = null
     client = null
@@ -843,6 +940,94 @@ export function useOpencodeApp() {
           Authorization: authorization
         }
       : undefined
+  }
+
+  function getChatOptionsCacheKey(directory?: string) {
+    return normalizeDirectory(directory) || GLOBAL_CHAT_OPTIONS_KEY
+  }
+
+  function setAvailableChatOptions(snapshot: ChatOptionsSnapshot, options: { preferredAgentId?: string; preferredModelKey?: string } = {}) {
+    availableModels.value = snapshot.models
+    availableAgents.value = snapshot.agents
+    availableCommands.value = snapshot.commands
+
+    if (!availableCommands.value.some((command) => command.name === selectedCommandName.value)) {
+      selectedCommandName.value = ''
+    }
+
+    applyChatSelections(options)
+  }
+
+  async function fetchChatOptionsSnapshot(directory?: string) {
+    const currentClient = getClient()
+    const normalizedDirectory = normalizeDirectory(directory)
+    const params = normalizedDirectory ? { directory: normalizedDirectory } : undefined
+    const [{ data: providerData }, { data: agentData }, { data: scopedCommandData }, { data: globalCommandData }, { data: skillData }] =
+      await Promise.all([
+        currentClient.provider.list(params),
+        currentClient.app.agents(params),
+        currentClient.command.list(params),
+        currentClient.command.list(),
+        currentClient.app.skills(params)
+      ])
+
+    return {
+      models: buildModelCatalog((providerData ?? {}) as ProviderListResponse),
+      agents: buildAgentCatalog((agentData ?? []) as AgentInfo[]),
+      commands: buildCommandCatalog(
+        (scopedCommandData ?? []) as OpencodeCommand[],
+        (globalCommandData ?? []) as OpencodeCommand[],
+        (skillData ?? []) as SkillInfo[]
+      )
+    } satisfies ChatOptionsSnapshot
+  }
+
+  async function ensureChatOptionsSnapshot(directory?: string) {
+    const cacheKey = getChatOptionsCacheKey(directory)
+    const cached = chatOptionsCache.get(cacheKey)
+    if (cached) {
+      return cached
+    }
+
+    const pendingRequest = chatOptionsRequests.get(cacheKey)
+    if (pendingRequest) {
+      return pendingRequest
+    }
+
+    const request = fetchChatOptionsSnapshot(directory)
+      .then((snapshot) => {
+        chatOptionsCache.set(cacheKey, snapshot)
+        return snapshot
+      })
+      .finally(() => {
+        chatOptionsRequests.delete(cacheKey)
+      })
+
+    chatOptionsRequests.set(cacheKey, request)
+    return request
+  }
+
+  function preloadChatOptions(directories: string[]) {
+    const uniqueDirectories = Array.from(new Set(directories.map((directory) => normalizeDirectory(directory)).filter(Boolean)))
+
+    void Promise.allSettled([
+      ensureChatOptionsSnapshot(),
+      ...uniqueDirectories.map((directory) => ensureChatOptionsSnapshot(directory))
+    ])
+  }
+
+  async function preloadHomeData() {
+    if (!authValidated.value) {
+      return
+    }
+
+    const directories = [draftDirectory.value, ...sessions.value.map((session) => session.directory ?? '')]
+    await Promise.allSettled([
+      ensureChatOptionsSnapshot(),
+      ...Array.from(new Set(directories.map((directory) => normalizeDirectory(directory)).filter(Boolean))).map((directory) =>
+        ensureChatOptionsSnapshot(directory)
+      )
+    ])
   }
 
   function applyChatSelections(options: { preferredAgentId?: string; preferredModelKey?: string } = {}) {
@@ -876,29 +1061,9 @@ export function useOpencodeApp() {
     preferredAgentId?: string
     preferredModelKey?: string
   } = {}) {
-    const currentClient = getClient()
     const directory = normalizeDirectory(options.directory ?? chatOptionDirectory.value)
-    const params = directory ? { directory } : undefined
-    const [{ data: providerData }, { data: agentData }, { data: scopedCommandData }, { data: globalCommandData }, { data: skillData }] =
-      await Promise.all([
-      currentClient.provider.list(params),
-      currentClient.app.agents(params),
-      currentClient.command.list(params),
-      currentClient.command.list(),
-      currentClient.app.skills(params)
-    ])
-
-    availableModels.value = buildModelCatalog((providerData ?? {}) as ProviderListResponse)
-    availableAgents.value = buildAgentCatalog((agentData ?? []) as AgentInfo[])
-    availableCommands.value = buildCommandCatalog(
-      (scopedCommandData ?? []) as OpencodeCommand[],
-      (globalCommandData ?? []) as OpencodeCommand[],
-      (skillData ?? []) as SkillInfo[]
-    )
-    if (!availableCommands.value.some((command) => command.name === selectedCommandName.value)) {
-      selectedCommandName.value = ''
-    }
-    applyChatSelections(options)
+    const snapshot = await ensureChatOptionsSnapshot(directory)
+    setAvailableChatOptions(snapshot, options)
   }
 
   function selectModel(modelKey: string) {
@@ -1017,6 +1182,7 @@ export function useOpencodeApp() {
 
       sessions.value = nextSessions
       syncSessionListUiState(nextSessions.map((session) => session.id))
+      syncSessionPreviewCache(nextSessions.map((session) => session.id))
 
       const currentSessionExists = nextSessions.some((session) => session.id === selectedSessionId.value)
       if (!currentSessionExists) {
@@ -1030,6 +1196,11 @@ export function useOpencodeApp() {
       if (options.reopen !== false && selectedSessionId.value) {
         await openSession(selectedSessionId.value)
       }
+
+      preloadChatOptions([
+        draftDirectory.value,
+        ...nextSessions.map((session) => session.directory ?? '')
+      ])
     } finally {
       isRefreshing.value = false
     }
@@ -1129,6 +1300,10 @@ export function useOpencodeApp() {
       })
 
       messages.value = pruneEmptyAssistantMessages(historyItems.map(convertHistoryMessage))
+      sessionPreviewMessages.value = {
+        ...sessionPreviewMessages.value,
+        [sessionId]: messages.value.slice()
+      }
       for (const request of ((questions ?? []) as QuestionRequest[]).filter((item) => item.sessionID === sessionId)) {
         applyQuestionAsked(messages.value, request)
       }
@@ -1185,6 +1360,40 @@ export function useOpencodeApp() {
     } catch (error) {
       handleRequestError(error)
     }
+  }
+
+  async function loadSessionPreview(sessionId: string, options: { limit?: number; force?: boolean } = {}) {
+    if (!sessionId) {
+      return [] as ChatMessageRecord[]
+    }
+
+    if (!options.force && sessionPreviewMessages.value[sessionId]?.length) {
+      return sessionPreviewMessages.value[sessionId]
+    }
+
+    try {
+      const currentClient = getClient()
+      const { data: history } = await currentClient.session.messages({
+        sessionID: sessionId,
+        limit: Math.max(options.limit ?? 24, 12)
+      })
+      const preview = pruneEmptyAssistantMessages(((history ?? []) as MessageHistoryItem[]).map(convertHistoryMessage))
+      sessionPreviewMessages.value = {
+        ...sessionPreviewMessages.value,
+        [sessionId]: preview
+      }
+      return preview
+    } catch (error) {
+      if (selectedSessionId.value === sessionId) {
+        handleRequestError(error)
+      }
+      return sessionPreviewMessages.value[sessionId] ?? []
+    }
+  }
+
+  async function preloadSessionPreviews(sessionIds: string[], options: { limit?: number; force?: boolean } = {}) {
+    const targets = [...new Set(sessionIds)].filter(Boolean)
+    await Promise.all(targets.map((sessionId) => loadSessionPreview(sessionId, options)))
   }
 
   async function sendCurrentMessage() {
@@ -1252,6 +1461,22 @@ export function useOpencodeApp() {
       isSending.value = false
       sessionStatus.value = 'idle'
     }
+  }
+
+  async function sendPromptToSession(sessionId: string, prompt: string) {
+    const trimmedPrompt = prompt.trim()
+    if (!sessionId || !trimmedPrompt || isSending.value) {
+      return
+    }
+
+    if (selectedSessionId.value !== sessionId || !messages.value.length) {
+      await openSession(sessionId)
+    }
+
+    composerText.value = trimmedPrompt
+    selectedCommandName.value = ''
+    composerMode.value = 'prompt'
+    await sendCurrentMessage()
   }
 
   async function replyPermission(requestId: string, reply: 'once' | 'always' | 'reject') {
@@ -1339,75 +1564,22 @@ export function useOpencodeApp() {
       clearPendingCompletionNotice(eventSessionId)
     }
 
+    if (eventSessionId) {
+      if (selectedSessionId.value === eventSessionId) {
+        messages.value = applyEventToMessageCollection(messages.value.slice(), event)
+      } else if (sessionPreviewMessages.value[eventSessionId]) {
+        sessionPreviewMessages.value = {
+          ...sessionPreviewMessages.value,
+          [eventSessionId]: applyEventToMessageCollection(sessionPreviewMessages.value[eventSessionId].slice(), event)
+        }
+      }
+    }
+
     if (!selectedSessionId.value || eventSessionId !== selectedSessionId.value) {
       return
     }
 
     switch (event.type) {
-      case 'message.updated': {
-        const info = (event.properties as { info: Partial<Message> & { id: string; role?: string } }).info
-        if (info.role === 'user') {
-          ensureChatMessage(messages.value, info)
-        }
-        break
-      }
-      case 'message.part.updated': {
-        const { part } = event.properties as { part: Part & { text?: string } }
-        if (part.type === 'text') {
-          const current = ensureChatMessage(messages.value, {
-            id: part.messageID,
-            role: messages.value.find((item) => item.id === part.messageID)?.role ?? 'assistant'
-          })
-          current.content = part.text ?? current.content
-          current.updatedAt = Date.now()
-          break
-        }
-
-        if (part.type === 'tool') {
-          const current = ensureAssistantMessage(messages.value, part.messageID)
-          const tools = current.tools ?? []
-          const existing = tools.find((item) => item.id === part.id)
-          const nextTool = {
-            id: part.id,
-            callId: part.callID,
-            name: part.tool,
-            status: getToolStatus(part.state.status),
-            title: 'title' in part.state ? part.state.title : undefined,
-            input: part.state.input
-          }
-
-          if (existing) {
-            Object.assign(existing, nextTool)
-          } else {
-            tools.push(nextTool)
-          }
-
-          current.tools = tools
-          current.updatedAt = Date.now()
-        }
-        break
-      }
-      case 'permission.asked': {
-        applyPermissionAsked(messages.value, event.properties as PermissionRequest)
-        break
-      }
-      case 'permission.replied': {
-        applyPermissionReplied(messages.value, event.properties as { sessionID: string; requestID: string; reply: 'once' | 'always' | 'reject' })
-        break
-      }
-      case 'question.asked': {
-        applyQuestionAsked(messages.value, event.properties as QuestionRequest)
-        break
-      }
-      case 'question.replied': {
-        const { requestID, answers } = event.properties as { requestID: string; answers: QuestionAnswer[] }
-        applyQuestionAnswered(messages.value, requestID, answers)
-        break
-      }
-      case 'question.rejected': {
-        applyQuestionRejected(messages.value, (event.properties as { requestID: string }).requestID)
-        break
-      }
       case 'session.status': {
         const { status } = event.properties as { status: { type: 'idle' | 'busy' | 'retry' } }
         sessionStatus.value = status.type === 'busy' ? 'busy' : 'idle'
@@ -1442,6 +1614,20 @@ export function useOpencodeApp() {
     writeSessionStorage(STORAGE_KEYS.password, nextPassword)
   })
   watch(selectedSessionId, (value) => writeStorage(STORAGE_KEYS.selectedSession, value))
+  watch(
+    [selectedSessionId, messages],
+    ([sessionId, nextMessages]) => {
+      if (!sessionId) {
+        return
+      }
+
+      sessionPreviewMessages.value = {
+        ...sessionPreviewMessages.value,
+        [sessionId]: nextMessages.slice()
+      }
+    },
+    { deep: true }
+  )
   watch(draftDirectory, (value) => writeStorage(STORAGE_KEYS.draftDirectory, value))
   watch(composerMode, (value) => writeStorage(STORAGE_KEYS.composerMode, value))
   watch(selectedAgentId, (value) => writeStorage(STORAGE_KEYS.selectedAgent, value))
@@ -1517,6 +1703,7 @@ export function useOpencodeApp() {
     projects,
     sessions,
     messages,
+    sessionPreviewMessages,
     visibleMessages,
     activeSession,
     selectedAgent,
@@ -1543,9 +1730,13 @@ export function useOpencodeApp() {
     refreshSessions,
     openSession,
     createSession,
+    sendPromptToSession,
+    loadSessionPreview,
+    preloadSessionPreviews,
     loadOlderMessages,
     requestNotificationPermission,
     promptInstall,
+    preloadHomeData,
     replyPermission,
     replyQuestion,
     rejectQuestion,

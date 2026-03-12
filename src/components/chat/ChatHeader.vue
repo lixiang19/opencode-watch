@@ -4,13 +4,13 @@ import { ArrowLeft, LoaderCircle } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 
 import Badge from '@/components/ui/badge/Badge.vue'
-import { useOpencodeState } from '@/lib/app-context'
+import { useOpencodeStore } from '@/stores/opencode'
 
-const app = useOpencodeState()
+const app = useOpencodeStore()
 const router = useRouter()
 
 const statusText = computed(() =>
-  app.sessionStatus.value === 'busy' || app.isSending.value ? '处理中' : ''
+  app.sessionStatus === 'busy' || app.isSending ? '处理中' : ''
 )
 
 function goBack() {
@@ -25,8 +25,8 @@ function goBack() {
     </button>
 
     <div class="topbar-center">
-      <div class="topbar-session-name">{{ app.activeSession.value?.title || '对话详情' }}</div>
-      <div class="topbar-project-name">{{ app.activeSession.value?.directory || '未绑定项目' }}</div>
+      <div class="topbar-session-name">{{ app.activeSession?.title || '对话详情' }}</div>
+      <div class="topbar-project-name">{{ app.activeSession?.directory || '未绑定项目' }}</div>
     </div>
 
     <div class="topbar-right">
@@ -36,10 +36,10 @@ function goBack() {
       </Badge>
       <span
         class="connection-pill"
-        :class="app.streamReady.value ? 'pill-connected' : 'pill-disconnected'"
+        :class="app.streamReady ? 'pill-connected' : 'pill-disconnected'"
       >
         <span class="connection-dot" />
-        {{ app.streamReady.value ? '已连接' : '未连接' }}
+        {{ app.streamReady ? '已连接' : '未连接' }}
       </span>
     </div>
   </header>

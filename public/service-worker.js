@@ -1,4 +1,4 @@
-const CACHE_NAME = 'opencode-mobile-web-chat-v1'
+const CACHE_NAME = 'opencode-mobile-web-chat-v2'
 const SHELL_ASSETS = ['/', '/index.html', '/manifest.webmanifest', '/icons/pwa-192.png']
 
 self.addEventListener('install', (event) => {

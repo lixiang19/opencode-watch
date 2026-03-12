@@ -3,14 +3,14 @@ import { computed, ref, watch } from 'vue'
 
 import Button from '@/components/ui/button/Button.vue'
 import Input from '@/components/ui/input/Input.vue'
-import { useOpencodeState } from '@/lib/app-context'
+import { useOpencodeStore } from '@/stores/opencode'
 import type { ChatMessageRecord } from '@/types/opencode'
 
 const props = defineProps<{
   message: ChatMessageRecord
 }>()
 
-const app = useOpencodeState()
+const app = useOpencodeStore()
 const isUser = computed(() => props.message.role === 'user')
 const questionChoices = ref<string[][]>([])
 const questionCustomInputs = ref<string[]>([])

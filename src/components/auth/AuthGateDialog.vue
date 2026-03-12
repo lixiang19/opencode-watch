@@ -4,14 +4,14 @@ import { KeyRound, RefreshCw, ShieldAlert } from 'lucide-vue-next'
 
 import Button from '@/components/ui/button/Button.vue'
 import Input from '@/components/ui/input/Input.vue'
-import { useOpencodeState } from '@/lib/app-context'
+import { useOpencodeStore } from '@/stores/opencode'
 
-const app = useOpencodeState()
+const app = useOpencodeStore()
 
-const canSubmit = computed(() => Boolean(app.username.value.trim()) && Boolean(app.password.value.trim()))
+const canSubmit = computed(() => Boolean(app.username.trim()) && Boolean(app.password.trim()))
 
 async function submitAuth() {
-  if (!canSubmit.value || app.isConnecting.value) {
+  if (!canSubmit.value || app.isConnecting) {
     return
   }
 
@@ -20,7 +20,7 @@ async function submitAuth() {
 </script>
 
 <template>
-  <div v-if="app.authGateVisible.value" class="auth-gate" role="dialog" aria-modal="true" aria-labelledby="auth-gate-title">
+  <div v-if="app.authGateVisible" class="auth-gate" role="dialog" aria-modal="true" aria-labelledby="auth-gate-title">
     <div class="auth-gate-backdrop" />
 
     <section class="auth-gate-panel">
@@ -30,18 +30,18 @@ async function submitAuth() {
 
       <p class="auth-gate-kicker">认证已启用</p>
       <h2 id="auth-gate-title">先完成账号验证</h2>
-      <p class="auth-gate-copy">{{ app.authGateMessage.value }}</p>
+      <p class="auth-gate-copy">{{ app.authGateMessage }}</p>
 
       <form class="auth-gate-form" @submit.prevent="submitAuth">
         <label class="settings-field">
           <span>认证账号</span>
-          <Input v-model="app.username.value" placeholder="请输入账号" autocomplete="username" autofocus />
+          <Input v-model="app.username" placeholder="请输入账号" autocomplete="username" autofocus />
         </label>
 
         <label class="settings-field">
           <span>认证密码</span>
           <Input
-            v-model="app.password.value"
+            v-model="app.password"
             type="password"
             placeholder="请输入密码"
             autocomplete="current-password"
@@ -53,10 +53,10 @@ async function submitAuth() {
           当前版本不会预填认证信息，必须手动输入后才能继续。
         </p>
 
-        <Button class="auth-gate-submit" type="submit" :disabled="!canSubmit || app.isConnecting.value">
-          <RefreshCw v-if="app.isConnecting.value" class="h-4 w-4 animate-spin" />
+        <Button class="auth-gate-submit" type="submit" :disabled="!canSubmit || app.isConnecting">
+          <RefreshCw v-if="app.isConnecting" class="h-4 w-4 animate-spin" />
           <ShieldAlert v-else class="h-4 w-4" />
-          {{ app.isConnecting.value ? '验证中...' : '验证并进入' }}
+          {{ app.isConnecting ? '验证中...' : '验证并进入' }}
         </Button>
       </form>
     </section>

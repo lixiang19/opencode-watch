@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted, watch } from 'vue'
 import { Wifi, WifiOff, MessageSquare, Clock, Folder, ChevronRight } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 
@@ -7,16 +7,16 @@ import Badge from '@/components/ui/badge/Badge.vue'
 import Button from '@/components/ui/button/Button.vue'
 import Card from '@/components/ui/card/Card.vue'
 import { formatRelativeTime } from '@/lib/format'
-import { useOpencodeState } from '@/lib/app-context'
+import { useOpencodeStore } from '@/stores/opencode'
 
-const app = useOpencodeState()
+const app = useOpencodeStore()
 const router = useRouter()
 
 const projectLookup = computed(() => {
-  const byDirectory = new Map<string, (typeof app.projects.value)[number]>()
-  const byId = new Map<string, (typeof app.projects.value)[number]>()
+  const byDirectory = new Map<string, (typeof app.projects)[number]>()
+  const byId = new Map<string, (typeof app.projects)[number]>()
 
-  for (const project of app.projects.value) {
+  for (const project of app.projects) {
     byDirectory.set(project.directory, project)
     if (project.projectId) {
       byId.set(project.projectId, project)
@@ -62,7 +62,7 @@ function getSessionInitial(title?: string, directory?: string | null) {
   return (title || directory || 'O').slice(0, 1).toUpperCase()
 }
 
-function getSessionProjectIcon(session: (typeof app.sessions.value)[number]) {
+function getSessionProjectIcon(session: (typeof app.sessions)[number]) {
   const project =
     (session.project?.id ? projectLookup.value.byId.get(session.project.id) : undefined) ||
     (session.directory ? projectLookup.value.byDirectory.get(session.directory) : undefined)
@@ -70,7 +70,7 @@ function getSessionProjectIcon(session: (typeof app.sessions.value)[number]) {
   return project?.icon?.override || project?.icon?.url || session.project?.icon?.override || session.project?.icon?.url || ''
 }
 
-function getSessionProjectIconStyle(session: (typeof app.sessions.value)[number]) {
+function getSessionProjectIconStyle(session: (typeof app.sessions)[number]) {
   const project =
     (session.project?.id ? projectLookup.value.byId.get(session.project.id) : undefined) ||
     (session.directory ? projectLookup.value.byDirectory.get(session.directory) : undefined)
@@ -78,6 +78,22 @@ function getSessionProjectIconStyle(session: (typeof app.sessions.value)[number]
   const accent = accentKey ? ICON_COLOR_VALUES[accentKey] : ''
   return accent ? { '--session-icon-accent': accent } : undefined
 }
+
+onMounted(() => {
+  void app.preloadHomeData()
+})
+
+watch(
+  () => app.authValidated,
+  (ready) => {
+    if (!ready) {
+      return
+    }
+
+    void app.preloadHomeData()
+  },
+  { immediate: true }
+)
 </script>
 
 <template>
@@ -85,16 +101,16 @@ function getSessionProjectIconStyle(session: (typeof app.sessions.value)[number]
     <header class="conversations-header">
       <div class="header-title">
         <h1>我的对话</h1>
-        <span class="count-badge" v-if="app.sessions.value.length">
-          {{ app.sessions.value.length }}
+        <span class="count-badge" v-if="app.sessions.length">
+          {{ app.sessions.length }}
         </span>
       </div>
     </header>
 
     <main class="conversations-content">
-      <div v-if="app.sessions.value.length" class="sessions-list">
+      <div v-if="app.sessions.length" class="sessions-list">
         <div
-          v-for="session in app.sessions.value"
+          v-for="session in app.sessions"
           :key="session.id"
           class="session-item"
           @click="openConversation(session.id)"
@@ -142,18 +158,18 @@ function getSessionProjectIconStyle(session: (typeof app.sessions.value)[number]
       <!-- 空状态 -->
       <div v-else class="empty-hero">
         <div class="hero-icon">
-          <Wifi v-if="app.streamReady.value" class="h-10 w-10 text-primary" />
+          <Wifi v-if="app.streamReady" class="h-10 w-10 text-primary" />
           <WifiOff v-else class="h-10 w-10 text-muted-foreground" />
         </div>
-        <h2>{{ app.streamReady.value ? '还没有对话' : '服务连接已断开' }}</h2>
+        <h2>{{ app.streamReady ? '还没有对话' : '服务连接已断开' }}</h2>
         <p>
-          {{ app.streamReady.value 
+          {{ app.streamReady 
             ? '您可以前往项目页选择一个项目并开启新的智能对话。' 
             : '请检查您的网络连接或在设置页面更新服务配置。' 
           }}
         </p>
         <div class="hero-actions">
-          <Button v-if="app.streamReady.value" @click="router.push('/')">
+          <Button v-if="app.streamReady" @click="router.push('/')">
             <MessageSquare class="h-4 w-4 mr-2" />
             浏览项目
           </Button>
