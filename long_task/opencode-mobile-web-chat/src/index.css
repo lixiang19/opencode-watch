@@ -1,0 +1,72 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: 39 47% 96%;
+  --foreground: 215 28% 17%;
+  --card: 36 29% 98%;
+  --card-foreground: 215 28% 17%;
+  --primary: 198 74% 31%;
+  --primary-foreground: 39 47% 96%;
+  --secondary: 34 17% 88%;
+  --secondary-foreground: 215 28% 17%;
+  --muted: 40 18% 91%;
+  --muted-foreground: 215 12% 39%;
+  --accent: 25 86% 54%;
+  --accent-foreground: 215 28% 17%;
+  --destructive: 5 82% 53%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 34 17% 80%;
+  --input: 34 17% 84%;
+  --ring: 198 74% 31%;
+}
+
+* {
+  @apply border-border;
+}
+
+html {
+  color-scheme: light;
+}
+
+body {
+  @apply bg-background text-foreground font-sans antialiased;
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  background-image:
+    radial-gradient(circle at top left, rgba(13, 148, 136, 0.08), transparent 28%),
+    radial-gradient(circle at bottom right, rgba(249, 115, 22, 0.14), transparent 24%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.78), rgba(244, 239, 229, 0.98));
+}
+
+#app {
+  min-height: 100vh;
+}
+
+.panel-grain {
+  background-image:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0.28)),
+    radial-gradient(rgba(15, 23, 42, 0.03) 0.7px, transparent 0.7px);
+  background-size: auto, 12px 12px;
+}
+
+.soft-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(15, 23, 42, 0.18) transparent;
+}
+
+.soft-scrollbar::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.soft-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(15, 23, 42, 0.18);
+  border-radius: 999px;
+}
+
+.soft-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
