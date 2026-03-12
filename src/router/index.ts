@@ -1,8 +1,9 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
-import MobileShell from '@/components/layout/MobileShell.vue'
+import AppLayout from '@/components/layout/AppLayout.vue'
 import ChatView from '@/pages/ChatView.vue'
-import HomeView from '@/pages/HomeView.vue'
+import ConversationListView from '@/pages/ConversationListView.vue'
+import ProjectsView from '@/pages/ProjectsView.vue'
 import SettingsView from '@/pages/SettingsView.vue'
 
 export const router = createRouter({
@@ -10,17 +11,18 @@ export const router = createRouter({
   routes: [
     {
       path: '/',
-      component: MobileShell,
+      component: AppLayout,
+      redirect: { name: 'conversations' },
       children: [
         {
-          path: '',
-          name: 'home',
-          component: HomeView
+          path: 'conversations',
+          name: 'conversations',
+          component: ConversationListView
         },
         {
-          path: 'chat/:sessionId?',
-          name: 'chat',
-          component: ChatView
+          path: 'projects',
+          name: 'projects',
+          component: ProjectsView
         },
         {
           path: 'settings',
@@ -28,6 +30,11 @@ export const router = createRouter({
           component: SettingsView
         }
       ]
+    },
+    {
+      path: '/conversations/:sessionId',
+      name: 'session',
+      component: ChatView
     }
   ]
 })

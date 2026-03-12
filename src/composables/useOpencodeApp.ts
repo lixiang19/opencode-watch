@@ -347,14 +347,16 @@ export function useOpencodeApp() {
     }
   }
 
-  async function createSession() {
-    const directory = activeProjectDirectory.value
+  async function createSession(directoryOverride?: string) {
+    const directory = normalizeDirectory(directoryOverride || activeProjectDirectory.value)
     if (!directory) {
       lastError.value = '请先输入项目目录，或选择一个已有项目。'
       return
     }
 
     lastError.value = ''
+    selectedProject.value = directory
+    draftDirectory.value = directory
 
     try {
       const currentClient = getClient()
@@ -390,8 +392,9 @@ export function useOpencodeApp() {
     lastError.value = ''
 
     try {
-      if (composerMode.value === 'command') {
-        const normalized = trimmed.replace(/^\//, '')
+      const isCommand = trimmed.startsWith('/')
+      if (isCommand) {
+        const normalized = trimmed.slice(1)
         const [command, ...rest] = normalized.split(/\s+/)
         if (!command) {
           throw new Error('命令不能为空。')

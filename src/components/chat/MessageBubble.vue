@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 
-import Card from '@/components/ui/card/Card.vue'
 import { formatClockTime } from '@/lib/format'
 import type { ChatMessageRecord } from '@/types/opencode'
 
@@ -10,29 +9,14 @@ const props = defineProps<{
 }>()
 
 const isUser = computed(() => props.message.role === 'user')
-
-const cardClass = computed(() =>
-  [
-    'max-w-[88%] space-y-2 rounded-[1.5rem] px-4 py-3 shadow-none',
-    isUser.value
-      ? 'border-transparent bg-slate-950 text-white'
-      : 'border-white/80 bg-white text-slate-900'
-  ].join(' ')
-)
-
-const timeLabel = computed(() => {
-  return formatClockTime(props.message.updatedAt)
-})
+const time = computed(() => formatClockTime(props.message.updatedAt))
 </script>
 
 <template>
-  <div :class="['flex w-full', isUser ? 'justify-end' : 'justify-start']">
-    <Card :class="cardClass">
-      <div class="flex items-center justify-between gap-3 text-[11px] uppercase tracking-[0.18em]" :class="isUser ? 'text-white/60' : 'text-slate-400'">
-        <span>{{ isUser ? '你' : 'Opencode' }}</span>
-        <span v-if="timeLabel">{{ timeLabel }}</span>
-      </div>
-      <p class="whitespace-pre-wrap break-words text-[15px] leading-7">{{ message.content || '...' }}</p>
-    </Card>
+  <div :class="['msg-row', isUser ? 'msg-row-user' : 'msg-row-assistant']">
+    <div :class="['msg-bubble', isUser ? 'msg-bubble-user' : 'msg-bubble-assistant']">
+      <p class="msg-text">{{ message.content || '…' }}</p>
+      <span class="msg-time">{{ time }}</span>
+    </div>
   </div>
 </template>
