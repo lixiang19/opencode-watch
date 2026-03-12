@@ -136,7 +136,7 @@ watch(
       <p v-if="message.content" class="msg-text">{{ message.content }}</p>
 
       <div v-if="message.question" class="msg-question">
-        <div class="msg-question-title">
+        <div class="msg-section-title">
           {{ message.question.status === 'pending' ? '需要你补充信息' : '表单结果' }}
         </div>
         <div
@@ -169,7 +169,7 @@ watch(
           />
         </div>
 
-        <div v-if="message.question.status === 'pending'" class="msg-question-actions">
+        <div v-if="message.question.status === 'pending'" class="msg-actions">
           <Button
             variant="outline"
             size="sm"
@@ -188,42 +188,42 @@ watch(
         </div>
 
         <div v-else-if="message.question.status === 'answered'" class="msg-question-summary">
-          <div class="msg-question-state">已提交</div>
-          <div v-for="item in questionSummary" :key="item.header" class="msg-question-summary-item">
-            <span class="msg-question-summary-label">{{ item.header }}</span>
-            <span class="msg-question-summary-value">{{ item.answers.join('、') || '未填写' }}</span>
+          <div class="msg-state msg-state-done">已提交</div>
+          <div v-for="item in questionSummary" :key="item.header" class="msg-summary-item">
+            <span class="msg-summary-label">{{ item.header }}</span>
+            <span class="msg-summary-value">{{ item.answers.join('、') || '未填写' }}</span>
           </div>
         </div>
 
         <div v-else class="msg-question-summary">
-          <div class="msg-question-state msg-question-state-muted">已拒绝回答</div>
+          <div class="msg-state msg-state-muted">已拒绝回答</div>
         </div>
       </div>
 
       <div v-if="message.confirmation" class="msg-permission">
-        <div class="msg-permission-title">需要权限确认</div>
+        <div class="msg-section-title">需要权限确认</div>
         <div class="msg-permission-row">
-          <span class="msg-permission-label">类型</span>
-          <span class="msg-permission-value">{{ message.confirmation.type }}</span>
+          <span class="msg-label">类型</span>
+          <span class="msg-value">{{ message.confirmation.type }}</span>
         </div>
-        <div v-if="message.confirmation.patterns.length" class="msg-permission-row msg-permission-row-stack">
-          <span class="msg-permission-label">规则</span>
-          <div class="msg-permission-tags">
+        <div v-if="message.confirmation.patterns.length" class="msg-permission-row msg-permission-stack">
+          <span class="msg-label">规则</span>
+          <div class="msg-tags">
             <span v-for="pattern in message.confirmation.patterns" :key="pattern" class="msg-tag">
               {{ pattern }}
             </span>
           </div>
         </div>
-        <div v-if="permissionMetadata.length" class="msg-permission-row msg-permission-row-stack">
-          <span class="msg-permission-label">输入</span>
-          <div class="msg-permission-meta">
+        <div v-if="permissionMetadata.length" class="msg-permission-row msg-permission-stack">
+          <span class="msg-label">输入</span>
+          <div class="msg-meta">
             <div v-for="item in permissionMetadata" :key="item.key" class="msg-meta-item">
               <span class="msg-meta-key">{{ item.key }}</span>
-              <span class="msg-meta-value">{{ item.value }}</span>
+              <span class="msg-meta-val">{{ item.value }}</span>
             </div>
           </div>
         </div>
-        <div class="msg-permission-actions">
+        <div class="msg-actions">
           <Button variant="outline" size="sm" @click="handlePermissionReply('once')">允许一次</Button>
           <Button size="sm" @click="handlePermissionReply('always')">始终允许</Button>
           <Button variant="destructive" size="sm" @click="handlePermissionReply('reject')">拒绝</Button>
@@ -246,99 +246,110 @@ watch(
   justify-content: flex-start;
 }
 
+/* ── Bubbles ── */
 .msg-bubble {
-  max-width: min(86%, 34rem);
-  padding: 0.875rem 1rem;
-  border-radius: 1.5rem;
+  max-width: min(82%, 32rem);
+  padding: 0.75rem 1rem;
+  border-radius: 1.375rem;
 }
 
 .msg-bubble-user {
   background: var(--primary);
   color: var(--primary-foreground);
-  border-bottom-right-radius: 0.625rem;
+  border-bottom-right-radius: 0.375rem;
 }
 
 .msg-bubble-assistant {
   border: 1px solid var(--border);
   background: var(--card);
   color: var(--card-foreground);
-  border-bottom-left-radius: 0.625rem;
+  border-bottom-left-radius: 0.375rem;
 }
 
 .msg-text {
   margin: 0;
+  font-size: 0.9375rem;
   line-height: 1.7;
   white-space: pre-wrap;
   word-break: break-word;
 }
 
+/* ── Question card ── */
 .msg-question,
 .msg-permission {
   display: grid;
-  gap: 0.65rem;
-  margin-top: 0.25rem;
-  padding: 0.85rem;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+  padding: 0.875rem;
   border-radius: 1rem;
 }
 
 .msg-question {
-  border: 1px solid color-mix(in srgb, var(--primary) 22%, var(--border));
-  background: color-mix(in srgb, var(--primary) 8%, var(--card));
+  border: 1px solid color-mix(in srgb, var(--primary) 20%, var(--border));
+  background: color-mix(in srgb, var(--primary) 6%, var(--card));
 }
 
 .msg-permission {
-  border: 1px solid color-mix(in srgb, var(--warning, #d97706) 24%, var(--border));
-  background: color-mix(in srgb, var(--accent) 18%, var(--card));
+  border: 1px solid color-mix(in srgb, var(--warning, #d97706) 22%, var(--border));
+  background: color-mix(in srgb, var(--accent) 14%, var(--card));
 }
 
-.msg-question-title,
-.msg-permission-title {
-  font-size: 0.875rem;
+.msg-section-title {
+  font-size: 0.8125rem;
   font-weight: 600;
+  letter-spacing: 0.01em;
 }
 
 .msg-question-block {
   display: grid;
-  gap: 0.55rem;
+  gap: 0.5rem;
 }
 
 .msg-question-header {
   color: var(--muted-foreground);
-  font-size: 0.75rem;
-  letter-spacing: 0.04em;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 
 .msg-question-copy {
   margin: 0;
+  font-size: 0.875rem;
   line-height: 1.6;
 }
 
 .msg-question-options {
   display: grid;
-  gap: 0.5rem;
+  gap: 0.4rem;
 }
 
 .msg-question-option {
   display: grid;
-  gap: 0.15rem;
-  padding: 0.75rem 0.85rem;
+  gap: 0.1rem;
+  padding: 0.625rem 0.75rem;
   border: 1px solid var(--border);
-  border-radius: 0.95rem;
-  background: color-mix(in srgb, var(--background) 80%, transparent);
+  border-radius: 0.875rem;
+  background: color-mix(in srgb, var(--background) 75%, transparent);
   color: inherit;
   text-align: left;
   font: inherit;
+  transition: border-color 0.12s, background 0.12s;
+  cursor: pointer;
 }
 
 .msg-question-option:disabled {
   cursor: default;
-  opacity: 0.82;
+  opacity: 0.8;
+}
+
+.msg-question-option:not(:disabled):hover {
+  border-color: color-mix(in srgb, var(--primary) 40%, var(--border));
 }
 
 .msg-question-option-active {
   border-color: color-mix(in srgb, var(--primary) 55%, var(--border));
-  background: color-mix(in srgb, var(--primary) 12%, var(--card));
+  background: color-mix(in srgb, var(--primary) 10%, var(--card));
 }
 
 .msg-question-option-label {
@@ -354,96 +365,107 @@ watch(
 
 .msg-question-input {
   height: auto;
-  min-height: 2.75rem;
+  min-height: 2.5rem;
 }
 
-.msg-question-actions,
-.msg-permission-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-}
-
-.msg-question-summary {
-  display: grid;
-  gap: 0.5rem;
-}
-
-.msg-question-state {
-  color: var(--primary);
-  font-size: 0.75rem;
-  font-weight: 600;
-}
-
-.msg-question-state-muted {
-  color: var(--muted-foreground);
-}
-
-.msg-question-summary-item {
-  display: grid;
-  gap: 0.2rem;
-}
-
-.msg-question-summary-label {
-  color: var(--muted-foreground);
-  font-size: 0.75rem;
-}
-
-.msg-question-summary-value {
-  line-height: 1.6;
-  word-break: break-word;
-}
-
-.msg-permission-row {
-  display: flex;
-  gap: 0.75rem;
-  align-items: flex-start;
-}
-
-.msg-permission-row-stack {
-  display: grid;
-  gap: 0.45rem;
-}
-
-.msg-permission-label,
-.msg-meta-key {
-  color: var(--muted-foreground);
-  font-size: 0.75rem;
-}
-
-.msg-permission-value,
-.msg-meta-value {
-  white-space: pre-wrap;
-  word-break: break-word;
-  line-height: 1.6;
-}
-
-.msg-permission-tags {
+.msg-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 0.4rem;
 }
 
+.msg-question-summary {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.msg-state {
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.msg-state-done {
+  color: var(--primary);
+}
+
+.msg-state-muted {
+  color: var(--muted-foreground);
+}
+
+.msg-summary-item {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.msg-summary-label {
+  color: var(--muted-foreground);
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.msg-summary-value {
+  font-size: 0.875rem;
+  line-height: 1.6;
+  word-break: break-word;
+}
+
+/* ── Permission ── */
+.msg-permission-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.msg-permission-stack {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.msg-label,
+.msg-meta-key {
+  color: var(--muted-foreground);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+
+.msg-value,
+.msg-meta-val {
+  font-size: 0.875rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.55;
+}
+
+.msg-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
 .msg-tag {
-  padding: 0.22rem 0.5rem;
+  padding: 0.2rem 0.5rem;
   border-radius: 999px;
   background: color-mix(in srgb, var(--primary) 10%, transparent);
   font-size: 0.75rem;
 }
 
-.msg-permission-meta {
+.msg-meta {
   display: grid;
-  gap: 0.45rem;
+  gap: 0.4rem;
 }
 
 .msg-meta-item {
   display: grid;
-  gap: 0.18rem;
+  gap: 0.15rem;
 }
 
 @media (max-width: 640px) {
   .msg-bubble {
-    max-width: 92%;
+    max-width: 90%;
   }
 }
 </style>

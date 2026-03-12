@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { SendHorizonal, LoaderCircle } from 'lucide-vue-next'
 
+import Select from '@/components/ui/select/Select.vue'
 import { useOpencodeState } from '@/lib/app-context'
 
 const app = useOpencodeState()
@@ -31,182 +32,178 @@ const selectedCommandDescription = computed(() => app.selectedCommand.value?.des
 
 <template>
   <footer class="composer">
-    <div class="composer-toolbar">
-      <label class="composer-select-field">
-        <span class="composer-select-label">Agent</span>
-        <select
-          v-if="canChooseAgent"
-          :value="app.selectedAgentId.value"
-          class="composer-select"
-          :disabled="disabled"
-          @change="app.selectAgent(($event.target as HTMLSelectElement).value)"
-        >
-          <option v-for="agent in app.availableAgents.value" :key="agent.id" :value="agent.id">
-            {{ agent.id }}
-          </option>
-        </select>
-        <div v-else class="composer-select-empty">使用服务默认 Agent</div>
-      </label>
-
-      <label class="composer-select-field">
-        <span class="composer-select-label">模型</span>
-        <select
-          v-if="canChooseModel"
-          :value="app.selectedModelKey.value"
-          class="composer-select"
-          :disabled="disabled"
-          @change="app.selectModel(($event.target as HTMLSelectElement).value)"
-        >
-          <option v-for="model in app.availableModels.value" :key="model.key" :value="model.key">
-            {{ model.providerId }}/{{ model.modelId }}
-          </option>
-        </select>
-        <div v-else class="composer-select-empty">使用服务默认模型</div>
-      </label>
-
-      <div class="composer-shortcut">Cmd/Ctrl + Enter 发送</div>
-    </div>
-
-    <div class="composer-command-panel">
-      <label class="composer-select-field composer-command-field">
-        <span class="composer-select-label">命令</span>
-        <select
-          :value="app.selectedCommandName.value"
-          class="composer-select"
-          :disabled="disabled || !hasCommandOptions"
-          @change="app.selectCommand(($event.target as HTMLSelectElement).value)"
-        >
-          <option value="">选择命令 / Skill</option>
-          <optgroup v-for="group in commandGroups" :key="group.label" :label="group.label">
-            <option v-for="command in group.items" :key="command.name" :value="command.name">
-              /{{ command.name }}{{ command.description ? ` - ${command.description}` : '' }}
+    <div class="composer-card">
+      <div class="composer-meta">
+        <div class="composer-selects">
+          <Select
+            v-if="canChooseAgent"
+            :model-value="app.selectedAgentId.value"
+            :disabled="disabled"
+            class="composer-select"
+            @change="app.selectAgent(($event.target as HTMLSelectElement).value)"
+          >
+            <option v-for="agent in app.availableAgents.value" :key="agent.id" :value="agent.id">
+              {{ agent.id }}
             </option>
-          </optgroup>
-        </select>
-      </label>
-    </div>
+          </Select>
+          <span v-else class="composer-select-empty">默认 Agent</span>
 
-    <div v-if="selectedCommandDescription" class="composer-command-help">
-      {{ selectedCommandDescription }}
-    </div>
+          <Select
+            v-if="canChooseModel"
+            :model-value="app.selectedModelKey.value"
+            :disabled="disabled"
+            class="composer-select composer-select-model"
+            @change="app.selectModel(($event.target as HTMLSelectElement).value)"
+          >
+            <option v-for="model in app.availableModels.value" :key="model.key" :value="model.key">
+              {{ model.providerId }}/{{ model.modelId }}
+            </option>
+          </Select>
+          <span v-else class="composer-select-empty">默认模型</span>
 
-    <div class="composer-input-row">
-      <textarea
-        :value="app.composerText.value"
-        :disabled="disabled"
-        placeholder="发送消息…"
-        class="composer-input soft-scrollbar"
-        rows="1"
-        @input="app.composerText.value = ($event.target as HTMLTextAreaElement).value"
-        @keydown.ctrl.enter.prevent="app.sendCurrentMessage"
-        @keydown.meta.enter.prevent="app.sendCurrentMessage"
-      />
-      <button
-        type="button"
-        class="btn-send"
-        :disabled="disabled"
-        @click="app.sendCurrentMessage"
-      >
-        <LoaderCircle v-if="app.isSending.value" class="h-5 w-5 animate-spin" />
-        <SendHorizonal v-else class="h-5 w-5" />
-      </button>
+          <Select
+            :model-value="app.selectedCommandName.value"
+            :disabled="disabled || !hasCommandOptions"
+            class="composer-select composer-select-cmd"
+            @change="app.selectCommand(($event.target as HTMLSelectElement).value)"
+          >
+            <option value="">/ 命令</option>
+            <optgroup v-for="group in commandGroups" :key="group.label" :label="group.label">
+              <option v-for="command in group.items" :key="command.name" :value="command.name">
+                /{{ command.name }}{{ command.description ? ` — ${command.description}` : '' }}
+              </option>
+            </optgroup>
+          </Select>
+        </div>
+
+        <span class="meta-shortcut">⌘↵</span>
+      </div>
+
+      <div v-if="selectedCommandDescription" class="composer-command-hint">
+        {{ selectedCommandDescription }}
+      </div>
+
+      <div class="composer-input-wrap">
+        <textarea
+          :value="app.composerText.value"
+          :disabled="disabled"
+          placeholder="发送消息…"
+          class="composer-input soft-scrollbar"
+          rows="1"
+          @input="app.composerText.value = ($event.target as HTMLTextAreaElement).value"
+          @keydown.ctrl.enter.prevent="app.sendCurrentMessage"
+          @keydown.meta.enter.prevent="app.sendCurrentMessage"
+        />
+        <button
+          type="button"
+          class="btn-send"
+          :disabled="disabled"
+          @click="app.sendCurrentMessage"
+        >
+          <LoaderCircle v-if="app.isSending.value" class="h-4 w-4 animate-spin" />
+          <SendHorizonal v-else class="h-4 w-4" />
+        </button>
+      </div>
     </div>
   </footer>
 </template>
 
 <style scoped>
 .composer {
-  padding: 0.875rem 1rem calc(0.875rem + env(safe-area-inset-bottom));
-  border-top: 1px solid var(--border);
+  padding: 0 0.875rem calc(0.875rem + env(safe-area-inset-bottom));
+  background: transparent;
+}
+
+.composer-card {
+  border: 1px solid var(--border);
+  border-radius: 1.5rem;
   background: var(--card);
+  box-shadow: var(--shadow-lg, 0 4px 24px rgba(0,0,0,.08));
+  overflow: hidden;
 }
 
-.composer-toolbar {
+/* ── Meta bar ── */
+.composer-meta {
   display: flex;
-  flex-wrap: wrap;
-  align-items: end;
-  gap: 0.75rem;
-  margin-bottom: 0.75rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.625rem 0.75rem 0;
 }
 
-.composer-select-field {
-  display: grid;
+.composer-selects {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 1;
   min-width: 0;
-  flex: 1 1 11rem;
-  gap: 0.375rem;
-}
-
-.composer-select-label,
-.composer-shortcut {
-  color: var(--muted-foreground);
-  font-size: 0.75rem;
-}
-
-.composer-select,
-.composer-select-empty {
-  min-height: 2.75rem;
-  padding: 0.75rem 0.875rem;
-  border: 1px solid var(--input);
-  border-radius: 1rem;
-  background: var(--background);
-  color: var(--foreground);
+  overflow: hidden;
 }
 
 .composer-select {
-  width: 100%;
-  outline: none;
+  flex: 1;
+  min-width: 0;
+  max-width: 11rem;
+  font-size: 0.8125rem;
 }
 
-.composer-select:focus {
-  border-color: var(--ring);
+.composer-select-model {
+  max-width: 14rem;
+}
+
+.composer-select-cmd {
+  max-width: 9rem;
 }
 
 .composer-select-empty {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-}
-
-.composer-shortcut {
-  margin-left: auto;
-  padding-bottom: 0.125rem;
+  height: 2.25rem;
+  padding: 0 0.75rem;
+  border: 1px solid var(--input);
+  border-radius: 0.75rem;
+  background: var(--background);
+  color: var(--muted-foreground);
+  font-size: 0.8125rem;
   white-space: nowrap;
 }
 
-.composer-input-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 0.625rem;
-  align-items: end;
+.meta-shortcut {
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+  flex-shrink: 0;
 }
 
-.composer-command-panel {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 0.625rem;
-  margin-bottom: 0.625rem;
-}
-
-.composer-command-field {
-  flex: none;
-}
-
-.composer-command-help {
-  margin-bottom: 0.625rem;
+/* ── Command hint ── */
+.composer-command-hint {
+  margin: 0.375rem 0.75rem 0;
+  padding: 0.4375rem 0.75rem;
+  border-radius: 0.75rem;
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
   color: var(--muted-foreground);
   font-size: 0.75rem;
   line-height: 1.5;
 }
 
+/* ── Input area ── */
+.composer-input-wrap {
+  display: flex;
+  align-items: flex-end;
+  gap: 0;
+  padding: 0.5rem 0.625rem 0.625rem 0.875rem;
+}
+
 .composer-input {
-  min-height: 3.25rem;
-  max-height: 11.25rem;
+  flex: 1;
+  min-height: 2.25rem;
+  max-height: 10rem;
   resize: none;
-  padding: 0.875rem 1rem;
-  border: 1px solid var(--input);
-  border-radius: 1.25rem;
-  background: var(--background);
+  padding: 0.375rem 0;
+  border: 0;
+  background: transparent;
   color: var(--foreground);
-  line-height: 1.6;
+  font-size: 0.9375rem;
+  line-height: 1.65;
   outline: none;
 }
 
@@ -214,33 +211,49 @@ const selectedCommandDescription = computed(() => app.selectedCommand.value?.des
   color: var(--muted-foreground);
 }
 
-.composer-input:focus {
-  border-color: var(--ring);
-}
-
-.btn-send {
-  display: grid;
-  width: 3.25rem;
-  height: 3.25rem;
-  place-items: center;
-  border: 0;
-  border-radius: 1.125rem;
-  background: var(--primary);
-  color: var(--primary-foreground);
-  box-shadow: var(--shadow-md);
-}
-
-.btn-send:disabled,
-.composer-input:disabled,
-.composer-select:disabled {
+.composer-input:disabled {
   opacity: 0.5;
 }
 
+.btn-send {
+  flex-shrink: 0;
+  display: grid;
+  width: 2.25rem;
+  height: 2.25rem;
+  place-items: center;
+  border: 0;
+  border-radius: 0.75rem;
+  background: var(--primary);
+  color: var(--primary-foreground);
+  transition: opacity 0.15s, transform 0.1s;
+  cursor: pointer;
+}
+
+.btn-send:hover:not(:disabled) {
+  opacity: 0.88;
+  transform: scale(1.04);
+}
+
+.btn-send:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+.btn-send:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
 @media (max-width: 640px) {
-  .composer-shortcut {
-    width: 100%;
-    margin-left: 0;
-    padding-bottom: 0;
+  .composer {
+    padding: 0 0.625rem calc(0.75rem + env(safe-area-inset-bottom));
+  }
+
+  .meta-shortcut {
+    display: none;
+  }
+
+  .composer-select-model {
+    display: none;
   }
 }
 </style>

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { LoaderCircle, MessagesSquare } from 'lucide-vue-next'
+import { LoaderCircle } from 'lucide-vue-next'
 
 import Button from '@/components/ui/button/Button.vue'
 import ChatComposer from '@/components/chat/ChatComposer.vue'
@@ -95,15 +95,17 @@ watch(
 
     <div ref="streamEl" class="chat-stream">
       <div v-if="app.hasTruncatedMessages.value" class="chat-history-banner">
-        <div class="chat-history-copy">仅加载最近 {{ app.historyMessageLimit.value }} 条消息，以保证流畅度。</div>
+        <span class="chat-history-copy">
+          仅加载最近 {{ app.historyMessageLimit.value }} 条消息
+        </span>
         <Button
           variant="outline"
           size="sm"
           :disabled="app.isLoadingOlderMessages.value"
           @click="loadOlderMessages"
         >
-          <LoaderCircle v-if="app.isLoadingOlderMessages.value" class="h-4 w-4 animate-spin" />
-          <template v-else>加载更早消息</template>
+          <LoaderCircle v-if="app.isLoadingOlderMessages.value" class="h-3.5 w-3.5 animate-spin" />
+          <template v-else>加载更早</template>
         </Button>
       </div>
 
@@ -122,15 +124,13 @@ watch(
 
       <div v-if="showAgentWorking" class="chat-working-card">
         <div class="chat-working-icon">
-          <LoaderCircle class="h-4 w-4 animate-spin" />
+          <LoaderCircle class="h-3.5 w-3.5 animate-spin" />
         </div>
         <div class="chat-working-body">
-          <strong>Agent 正在努力工作</strong>
+          <strong>Agent 正在处理</strong>
           <span>正在分析上下文、调用工具或整理回复…</span>
         </div>
       </div>
-
-   
     </div>
 
     <ChatComposer />
@@ -151,121 +151,108 @@ watch(
   display: flex;
   min-height: 0;
   flex-direction: column;
-  gap: 0.875rem;
+  gap: 0.75rem;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: 1rem 1rem 0.75rem;
+  padding: 1.25rem 1.125rem 0.5rem;
+  scroll-padding-bottom: 1rem;
 }
 
+/* ── Error ── */
 .chat-alert {
-  margin: 0;
-  padding: 0.875rem 1rem;
-  border: 1px solid color-mix(in srgb, var(--destructive) 40%, var(--border));
-  border-radius: 1.25rem;
-  background: color-mix(in srgb, var(--destructive) 10%, var(--card));
+  padding: 0.75rem 1rem;
+  border: 1px solid color-mix(in srgb, var(--destructive) 35%, var(--border));
+  border-radius: 1rem;
+  background: color-mix(in srgb, var(--destructive) 8%, var(--card));
   color: var(--destructive);
+  font-size: 0.875rem;
+  line-height: 1.55;
 }
 
+/* ── History banner ── */
 .chat-history-banner {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
-  padding: 0.875rem 1rem;
+  padding: 0.625rem 0.875rem;
   border: 1px solid var(--border);
-  border-radius: 1.25rem;
-  background: color-mix(in srgb, var(--accent) 20%, var(--card));
+  border-radius: 999px;
+  background: var(--card);
 }
 
 .chat-history-copy {
   color: var(--muted-foreground);
   font-size: 0.8125rem;
-  line-height: 1.5;
 }
 
-.chat-loading,
-.chat-empty {
+/* ── Loading ── */
+.chat-loading {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
   color: var(--muted-foreground);
+  font-size: 0.875rem;
 }
 
+/* ── Working indicator ── */
 .chat-working-card {
-  display: grid;
-  max-width: min(86%, 28rem);
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 0.75rem;
-  padding: 0.875rem 1rem;
+  display: inline-flex;
+  align-self: flex-start;
+  align-items: center;
+  gap: 0.625rem;
+  max-width: min(84%, 26rem);
+  padding: 0.625rem 0.875rem 0.625rem 0.625rem;
   border: 1px solid var(--border);
-  border-radius: 1.5rem;
-  border-bottom-left-radius: 0.625rem;
-  background: color-mix(in srgb, var(--accent) 22%, var(--card));
+  border-radius: 999px;
+  background: var(--card);
   color: var(--card-foreground);
 }
 
 .chat-working-icon {
   display: grid;
-  width: 2rem;
-  height: 2rem;
+  width: 1.75rem;
+  height: 1.75rem;
+  flex-shrink: 0;
   place-items: center;
   border-radius: 999px;
-  background: var(--card);
+  background: color-mix(in srgb, var(--primary) 12%, var(--background));
   color: var(--primary);
 }
 
 .chat-working-body {
-  display: grid;
-  gap: 0.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
 }
 
 .chat-working-body strong {
   color: var(--foreground);
-  font-size: 0.9375rem;
+  font-size: 0.875rem;
+  font-weight: 600;
 }
 
 .chat-working-body span {
   color: var(--muted-foreground);
-  font-size: 0.8125rem;
-  line-height: 1.6;
-}
-
-.chat-loading {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.chat-empty {
-  display: grid;
-  flex: 1;
-  place-items: center;
-  padding: 1.5rem;
-  text-align: center;
-}
-
-.chat-empty-icon {
-  color: var(--muted-foreground);
-  opacity: 0.5;
+  font-size: 0.75rem;
+  line-height: 1.5;
 }
 
 @media (min-width: 768px) {
   .chat-layout {
-    width: min(60rem, calc(100vw - 2.5rem));
+    width: min(58rem, calc(100vw - 2.5rem));
     height: calc(100dvh - var(--tabbar-height, 0px) - 2.5rem);
     margin: 1.25rem auto;
     border: 1px solid var(--border);
     border-radius: 1.75rem;
-    box-shadow: var(--shadow-xl);
+    box-shadow: 0 8px 48px rgba(0, 0, 0, 0.1), 0 2px 8px rgba(0, 0, 0, 0.06);
     overflow: hidden;
   }
 }
 
 @media (max-width: 640px) {
   .chat-history-banner {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .chat-working-card {
-    max-width: 92%;
+    border-radius: 1rem;
   }
 }
 </style>
