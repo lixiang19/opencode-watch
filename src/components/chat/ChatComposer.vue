@@ -9,6 +9,24 @@ const app = useOpencodeState()
 const disabled = computed(() => !app.streamReady.value || app.isSending.value)
 const canChooseAgent = computed(() => app.availableAgents.value.length > 0)
 const canChooseModel = computed(() => app.availableModels.value.length > 0)
+const hasCommandOptions = computed(() => app.availableCommands.value.length > 0)
+const commandGroups = computed(() => {
+  return [
+    {
+      label: '系统命令',
+      items: app.availableCommands.value.filter((command) => command.category === 'system')
+    },
+    {
+      label: '自定义命令',
+      items: app.availableCommands.value.filter((command) => command.category === 'custom')
+    },
+    {
+      label: 'Skill',
+      items: app.availableCommands.value.filter((command) => command.category === 'skill')
+    }
+  ].filter((group) => group.items.length > 0)
+})
+const selectedCommandDescription = computed(() => app.selectedCommand.value?.description || '')
 </script>
 
 <template>
@@ -49,11 +67,34 @@ const canChooseModel = computed(() => app.availableModels.value.length > 0)
       <div class="composer-shortcut">Cmd/Ctrl + Enter 发送</div>
     </div>
 
+    <div class="composer-command-panel">
+      <label class="composer-select-field composer-command-field">
+        <span class="composer-select-label">命令</span>
+        <select
+          :value="app.selectedCommandName.value"
+          class="composer-select"
+          :disabled="disabled || !hasCommandOptions"
+          @change="app.selectCommand(($event.target as HTMLSelectElement).value)"
+        >
+          <option value="">选择命令 / Skill</option>
+          <optgroup v-for="group in commandGroups" :key="group.label" :label="group.label">
+            <option v-for="command in group.items" :key="command.name" :value="command.name">
+              /{{ command.name }}{{ command.description ? ` - ${command.description}` : '' }}
+            </option>
+          </optgroup>
+        </select>
+      </label>
+    </div>
+
+    <div v-if="selectedCommandDescription" class="composer-command-help">
+      {{ selectedCommandDescription }}
+    </div>
+
     <div class="composer-input-row">
       <textarea
         :value="app.composerText.value"
         :disabled="disabled"
-        placeholder="发送消息… (/ 开头执行命令)"
+        placeholder="发送消息…"
         class="composer-input soft-scrollbar"
         rows="1"
         @input="app.composerText.value = ($event.target as HTMLTextAreaElement).value"
@@ -136,6 +177,24 @@ const canChooseModel = computed(() => app.availableModels.value.length > 0)
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 0.625rem;
   align-items: end;
+}
+
+.composer-command-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.625rem;
+  margin-bottom: 0.625rem;
+}
+
+.composer-command-field {
+  flex: none;
+}
+
+.composer-command-help {
+  margin-bottom: 0.625rem;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+  line-height: 1.5;
 }
 
 .composer-input {

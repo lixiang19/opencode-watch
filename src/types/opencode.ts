@@ -3,10 +3,17 @@ export interface SessionTimeMeta {
   updated?: number
 }
 
+export interface ProjectIconRecord {
+  url?: string
+  override?: string
+  color?: string
+}
+
 export interface SessionProjectMeta {
   id: string
   name?: string
   worktree: string
+  icon?: ProjectIconRecord
 }
 
 export interface SessionRecord {
@@ -19,8 +26,10 @@ export interface SessionRecord {
 }
 
 export interface ProjectRecord {
+  projectId?: string
   directory: string
   name: string
+  icon?: ProjectIconRecord
   lastUpdated: number
   sessionCount: number
   source?: 'server' | 'session' | 'manual'
@@ -32,6 +41,40 @@ export interface ChatMessageRecord {
   role: 'user' | 'assistant'
   content: string
   updatedAt?: number
+  tools?: Array<{
+    id: string
+    callId: string
+    name: string
+    status: 'pending' | 'running' | 'completed' | 'failed'
+    title?: string
+    input?: Record<string, unknown>
+  }>
+  confirmation?: {
+    id: string
+    sessionId: string
+    type: string
+    patterns: string[]
+    metadata: Record<string, unknown>
+    callId?: string
+    response?: 'once' | 'always' | 'reject'
+  }
+  question?: {
+    id: string
+    sessionId: string
+    callId?: string
+    status: 'pending' | 'answered' | 'rejected'
+    questions: Array<{
+      header: string
+      question: string
+      options: Array<{
+        label: string
+        description: string
+      }>
+      multiple?: boolean
+      custom?: boolean
+    }>
+    answers?: string[][]
+  }
 }
 
 export interface ChatModelRecord {
@@ -53,6 +96,15 @@ export interface ChatAgentRecord {
     modelId: string
   }
   variant?: string
+}
+
+export interface ChatCommandRecord {
+  name: string
+  description: string
+  template: string
+  hints: string[]
+  source?: 'command' | 'mcp' | 'skill'
+  category: 'system' | 'custom' | 'skill'
 }
 
 export type ComposerMode = 'prompt' | 'command'

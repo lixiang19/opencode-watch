@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { Wifi, WifiOff, MessageSquare, Clock, Folder, ChevronRight } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 
@@ -10,6 +11,32 @@ import { useOpencodeState } from '@/lib/app-context'
 
 const app = useOpencodeState()
 const router = useRouter()
+
+const projectLookup = computed(() => {
+  const byDirectory = new Map<string, (typeof app.projects.value)[number]>()
+  const byId = new Map<string, (typeof app.projects.value)[number]>()
+
+  for (const project of app.projects.value) {
+    byDirectory.set(project.directory, project)
+    if (project.projectId) {
+      byId.set(project.projectId, project)
+    }
+  }
+
+  return {
+    byDirectory,
+    byId
+  }
+})
+
+const ICON_COLOR_VALUES: Record<string, string> = {
+  pink: '#e85d75',
+  mint: '#24b48a',
+  orange: '#e98a1d',
+  purple: '#7c62f2',
+  cyan: '#1597b8',
+  lime: '#7aac20'
+}
 
 function formatSessionDirectory(directory?: string | null) {
   if (!directory) {
@@ -30,6 +57,27 @@ function openConversation(sessionId: string) {
   app.clearSessionListBadges(sessionId)
   void router.push({ name: 'session', params: { sessionId } })
 }
+
+function getSessionInitial(title?: string, directory?: string | null) {
+  return (title || directory || 'O').slice(0, 1).toUpperCase()
+}
+
+function getSessionProjectIcon(session: (typeof app.sessions.value)[number]) {
+  const project =
+    (session.project?.id ? projectLookup.value.byId.get(session.project.id) : undefined) ||
+    (session.directory ? projectLookup.value.byDirectory.get(session.directory) : undefined)
+
+  return project?.icon?.override || project?.icon?.url || session.project?.icon?.override || session.project?.icon?.url || ''
+}
+
+function getSessionProjectIconStyle(session: (typeof app.sessions.value)[number]) {
+  const project =
+    (session.project?.id ? projectLookup.value.byId.get(session.project.id) : undefined) ||
+    (session.directory ? projectLookup.value.byDirectory.get(session.directory) : undefined)
+  const accentKey = project?.icon?.color || session.project?.icon?.color || ''
+  const accent = accentKey ? ICON_COLOR_VALUES[accentKey] : ''
+  return accent ? { '--session-icon-accent': accent } : undefined
+}
 </script>
 
 <template>
@@ -45,53 +93,50 @@ function openConversation(sessionId: string) {
 
     <main class="conversations-content">
       <div v-if="app.sessions.value.length" class="sessions-list">
-        <Card
+        <div
           v-for="session in app.sessions.value"
           :key="session.id"
-          class="session-card"
+          class="session-item"
           @click="openConversation(session.id)"
         >
-          <div class="card-body">
-            <div class="session-avatar-box">
-              <div class="avatar-circle">
-                {{ (session.title || session.directory || 'O').slice(0, 1).toUpperCase() }}
-              </div>
+          <div class="session-avatar-box">
+            <div class="avatar-circle" :style="getSessionProjectIconStyle(session)">
+              <img
+                v-if="getSessionProjectIcon(session)"
+                :src="getSessionProjectIcon(session)"
+                alt=""
+                class="avatar-image"
+              />
+              <span v-else>{{ getSessionInitial(session.title, session.directory) }}</span>
             </div>
+            <!-- 可以后续添加未读红点 -->
+          </div>
 
-            <div class="session-info">
-              <div class="session-top-row">
-                <div class="session-heading">
-                  <h3 class="session-title">{{ session.title || '未命名对话' }}</h3>
-                  <div class="session-badges">
-                    <Badge
-                      v-for="badge in app.getSessionListBadges(session.id)"
-                      :key="badge.key"
-                      :tone="badge.tone"
-                      class="session-badge"
-                    >
-                      {{ badge.label }}
-                    </Badge>
-                  </div>
-                </div>
-                <span class="session-time">
-                  <Clock class="inline-icon" />
-                  {{ formatRelativeTime(session.time.updated || session.time.created) }}
-                </span>
-              </div>
-              
-              <div class="session-meta">
-                <p class="session-path">
-                  <Folder class="inline-icon" />
-                  {{ formatSessionDirectory(session.directory) }}
-                </p>
-              </div>
+          <div class="session-info">
+            <div class="session-top-row">
+              <h3 class="session-title">{{ session.title || '未命名对话' }}</h3>
+              <span class="session-time">
+                {{ formatRelativeTime(session.time.updated || session.time.created) }}
+              </span>
             </div>
-
-            <div class="session-action">
-              <ChevronRight class="h-5 w-5 text-muted-foreground opacity-30" />
+            
+            <div class="session-bottom-row">
+              <p class="session-preview">
+                {{ formatSessionDirectory(session.directory) }}
+              </p>
+              <div class="session-badges" v-if="app.getSessionListBadges(session.id).length">
+                <Badge
+                  v-for="badge in app.getSessionListBadges(session.id)"
+                  :key="badge.key"
+                  :tone="badge.tone"
+                  class="session-badge"
+                >
+                  {{ badge.label }}
+                </Badge>
+              </div>
             </div>
           </div>
-        </Card>
+        </div>
       </div>
 
       <!-- 空状态 -->
@@ -134,24 +179,25 @@ function openConversation(sessionId: string) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 1.5rem 1.25rem 1rem;
+  padding: 1.25rem 1rem 0.75rem;
   position: sticky;
   top: 0;
   z-index: 10;
   background: var(--background);
+  border-bottom: 0.5px solid color-mix(in srgb, var(--border) 40%, transparent);
 }
 
 .header-title {
   display: flex;
-  align-items: baseline;
-  gap: 0.75rem;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 .header-title h1 {
-  font-size: 1.5rem;
-  font-weight: 700;
+  font-size: 1.25rem;
+  font-weight: 600;
   margin: 0;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.01em;
 }
 
 .count-badge {
@@ -165,139 +211,121 @@ function openConversation(sessionId: string) {
 
 .conversations-content {
   flex: 1;
-  padding: 0 1rem 2rem;
+  padding: 0;
 }
 
 .sessions-list {
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
-  max-width: 800px;
-  margin: 0 auto;
+  max-width: 100%;
+  margin: 0;
 }
 
-/* 对话卡片样式 */
-.session-card {
-  border-radius: 1rem;
-  overflow: hidden;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  border: 1px solid var(--border);
-  background: var(--card);
-  cursor: pointer;
-}
-
-.session-card:hover {
-  transform: translateY(-1px);
-  background: color-mix(in srgb, var(--accent) 5%, var(--card));
-  border-color: var(--primary);
-  box-shadow: 0 8px 20px -12px rgba(0,0,0,0.1);
-}
-
-.card-body {
-  padding: 1.125rem 1.25rem;
+/* 聊天列表项样式 */
+.session-item {
   display: flex;
   align-items: center;
-  gap: 1.25rem;
+  gap: 0.875rem;
+  padding: 0.875rem 1rem;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+  border-bottom: 0.5px solid color-mix(in srgb, var(--border) 40%, transparent);
+}
+
+.session-item:last-child {
+  border-bottom: none;
+}
+
+.session-item:hover {
+  background-color: color-mix(in srgb, var(--accent) 8%, transparent);
 }
 
 .session-avatar-box {
   flex-shrink: 0;
+  position: relative;
 }
 
 .avatar-circle {
-  width: 3.25rem;
-  height: 3.25rem;
-  border-radius: 1rem;
-  background: var(--primary);
+  --session-icon-accent: var(--primary);
+  width: 3rem;
+  height: 3rem;
+  border-radius: 0.75rem;
+  background: var(--session-icon-accent);
   color: var(--primary-foreground);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 1.25rem;
-  font-weight: 700;
-  box-shadow: 0 4px 12px color-mix(in srgb, var(--primary) 15%, transparent);
+  font-size: 1.125rem;
+  font-weight: 600;
+  overflow: hidden;
+  /* 聊天软件风格：更清爽的头像，不带过多阴影 */
+}
+
+.avatar-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .session-info {
   flex: 1;
   min-width: 0;
-}
-
-.session-top-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 0.75rem;
-  margin-bottom: 0.375rem;
-}
-
-.session-heading {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  min-width: 0;
-}
-
-.session-title {
-  font-size: 1.0625rem;
-  font-weight: 600;
-  margin: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  color: var(--foreground);
-}
-
-.session-badges {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.375rem;
-  flex-shrink: 0;
-}
-
-.session-badge {
-  padding: 0.25rem 0.55rem;
-  font-size: 0.625rem;
-  letter-spacing: 0.08em;
-}
-
-.session-time {
-  font-size: 0.75rem;
-  color: var(--muted-foreground);
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
-  flex-shrink: 0;
-}
-
-.session-meta {
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
 }
 
-.session-path {
-  font-size: 0.8125rem;
-  color: var(--muted-foreground);
+.session-top-row {
   display: flex;
+  justify-content: space-between;
   align-items: center;
-  gap: 0.375rem;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+.session-title {
+  font-size: 1rem;
+  font-weight: 500;
+  margin: 0;
+  color: var(--foreground);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.inline-icon {
-  width: 0.875rem;
-  height: 0.875rem;
+.session-time {
+  font-size: 0.75rem;
+  color: var(--muted-foreground);
   flex-shrink: 0;
-  opacity: 0.6;
+  font-weight: 400;
 }
 
-.session-action {
+.session-bottom-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.session-preview {
+  font-size: 0.8125rem;
+  color: var(--muted-foreground);
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  line-height: 1.25rem;
+}
+
+.session-badges {
+  display: flex;
+  gap: 0.25rem;
   flex-shrink: 0;
-  margin-left: 0.5rem;
+}
+
+.session-badge {
+  padding: 0.125rem 0.375rem;
+  font-size: 0.625rem;
+  border-radius: 4px;
 }
 
 /* 空状态 */

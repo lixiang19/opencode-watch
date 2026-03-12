@@ -130,12 +130,7 @@ watch(
         </div>
       </div>
 
-      <div v-else-if="!app.isLoadingSession.value" class="chat-empty">
-        <MessagesSquare class="chat-empty-icon h-10 w-10" />
-        <p class="chat-empty-copy">
-          {{ app.activeSession.value ? '发送第一条消息开始对话' : '先回到对话页，或去项目页新建一个会话' }}
-        </p>
-      </div>
+   
     </div>
 
     <ChatComposer />
@@ -249,12 +244,6 @@ watch(
 .chat-empty-icon {
   color: var(--muted-foreground);
   opacity: 0.5;
-}
-
-.chat-empty-copy {
-  max-width: 16rem;
-  margin: 0.75rem 0 0;
-  line-height: 1.7;
 }
 
 @media (min-width: 768px) {

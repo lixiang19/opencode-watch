@@ -1,8 +1,47 @@
 {
-  "name": "opencode-mobile-web-chat",
-  "private": true,
-  "version": "0.0.0",
+  "name": "opchat",
+  "version": "0.1.0",
+  "description": "Mobile-first web chat and CLI wrapper for opencode",
+  "license": "UNLICENSED",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lixiang19/opencode-watch.git"
+  },
+  "homepage": "https://github.com/lixiang19/opencode-watch#readme",
+  "bugs": {
+    "url": "https://github.com/lixiang19/opencode-watch/issues"
+  },
+  "files": [
+    "bin",
+    "public",
+    "scripts",
+    "src",
+    "components.json",
+    "index.html",
+    "postcss.config.cjs",
+    "tailwind.config.ts",
+    "tsconfig.app.json",
+    "tsconfig.json",
+    "tsconfig.node.json",
+    "vite.config.ts"
+  ],
+  "bin": {
+    "opchat": "bin/opchat.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "opencode",
+    "cli",
+    "chat",
+    "vite",
+    "vue"
+  ],
   "scripts": {
     "dev": "vite --host 0.0.0.0 --port 9000 --strictPort",
     "build": "vue-tsc -b && vite build",
@@ -11,23 +50,21 @@
   },
   "dependencies": {
     "@opencode-ai/sdk": "^1.2.24",
-    "class-variance-authority": "^0.7.1",
-    "clsx": "^2.1.1",
-    "lucide-vue-next": "^0.511.0",
-    "tailwind-merge": "^3.3.0",
-    "vue": "^3.5.13",
-    "vue-router": "^4.5.1"
-  },
-  "devDependencies": {
     "@types/node": "^22.13.10",
     "@vue/tsconfig": "^0.7.0",
     "@vitejs/plugin-vue": "^5.2.1",
     "autoprefixer": "^10.4.20",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "lucide-vue-next": "^0.511.0",
     "postcss": "^8.5.3",
     "tailwindcss": "^3.4.17",
     "tailwindcss-animate": "^1.0.7",
     "typescript": "~5.8.3",
     "vite": "^6.2.0",
+    "tailwind-merge": "^3.3.0",
+    "vue": "^3.5.13",
+    "vue-router": "^4.5.1",
     "vue-tsc": "^2.2.8"
   }
 }

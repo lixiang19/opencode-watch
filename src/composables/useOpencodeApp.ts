@@ -1,9 +1,13 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   createOpencodeClient,
+  type Command as OpencodeCommand,
   type Event as OpencodeEvent,
   type Message,
   type Part,
+  type PermissionRequest,
+  type QuestionAnswer,
+  type QuestionRequest,
   type Project
 } from '@opencode-ai/sdk/v2/client'
 
@@ -22,9 +26,11 @@ import {
 } from '@/lib/pwa'
 import type {
   ChatAgentRecord,
+  ChatCommandRecord,
   ChatMessageRecord,
   ChatModelRecord,
   ComposerMode,
+  ProjectIconRecord,
   ProjectRecord,
   SessionRecord
 } from '@/types/opencode'
@@ -56,6 +62,7 @@ type SessionListUiState = Partial<Record<SessionListFlag, boolean>>
 
 type OpencodeClient = ReturnType<typeof createOpencodeClient>
 type MessageHistoryItem = { info: Message; parts: Part[] }
+type ChatToolStatus = NonNullable<ChatMessageRecord['tools']>[number]['status']
 type ProviderModelInfo = {
   id: string
   name?: string
@@ -80,6 +87,13 @@ type AgentInfo = {
     modelID: string
   }
   variant?: string
+}
+
+type SkillInfo = {
+  name: string
+  description: string
+  location: string
+  content: string
 }
 
 function normalizeDirectory(input?: string | null) {
@@ -173,6 +187,31 @@ function buildAgentCatalog(input?: AgentInfo[]) {
     .sort((left, right) => left.id.localeCompare(right.id))
 }
 
+function buildCommandCatalog(
+  scopedCommands: OpencodeCommand[] = [],
+  globalCommands: OpencodeCommand[] = [],
+  skills: SkillInfo[] = []
+) {
+  const globalNames = new Set(globalCommands.map((command) => command.name))
+  const skillNames = new Set(skills.map((skill) => skill.name))
+
+  return scopedCommands
+    .map<ChatCommandRecord>((command) => {
+      const isSkill = command.source === 'skill' || skillNames.has(command.name)
+      const category = isSkill ? 'skill' : globalNames.has(command.name) ? 'system' : 'custom'
+
+      return {
+        name: command.name,
+        description: command.description || '',
+        template: command.template,
+        hints: command.hints ?? [],
+        source: command.source,
+        category
+      }
+    })
+    .sort((left, right) => left.name.localeCompare(right.name))
+}
+
 function getHistorySelection(history: MessageHistoryItem[]) {
   for (let index = history.length - 1; index >= 0; index -= 1) {
     const info = history[index]?.info as Message & {
@@ -202,7 +241,7 @@ function getHistorySelection(history: MessageHistoryItem[]) {
   }
 }
 
-function ensureTextMessage(messages: ChatMessageRecord[], info: Partial<Message> & { id: string; role?: string }) {
+function ensureChatMessage(messages: ChatMessageRecord[], info: Partial<Message> & { id: string; role?: string }) {
   let current = messages.find((item) => item.id === info.id)
   if (!current) {
     current = {
@@ -217,6 +256,13 @@ function ensureTextMessage(messages: ChatMessageRecord[], info: Partial<Message>
   return current
 }
 
+function ensureAssistantMessage(messages: ChatMessageRecord[], messageId: string) {
+  return ensureChatMessage(messages, {
+    id: messageId,
+    role: 'assistant'
+  })
+}
+
 function extractTextContent(parts: Part[]) {
   return parts
     .filter((part) => part.type === 'text')
@@ -225,18 +271,119 @@ function extractTextContent(parts: Part[]) {
 }
 
 function pruneEmptyAssistantMessages(messages: ChatMessageRecord[]) {
-  return messages.filter((message) => message.role === 'user' || message.content.trim())
+  return messages.filter((message) => isRenderableMessage(message))
+}
+
+function isRenderableMessage(message: ChatMessageRecord) {
+  return Boolean(message.role === 'user' || message.content.trim() || message.confirmation || message.question)
+}
+
+function getToolStatus(status: 'pending' | 'running' | 'completed' | 'error'): ChatToolStatus {
+  return status === 'error' ? 'failed' : status
 }
 
 function convertHistoryMessage(item: MessageHistoryItem): ChatMessageRecord {
   const content = extractTextContent(item.parts)
+  const tools = item.parts
+    .filter((part): part is Extract<Part, { type: 'tool' }> => part.type === 'tool')
+    .map((part) => ({
+      id: part.id,
+      callId: part.callID,
+      name: part.tool,
+      status: getToolStatus(part.state.status),
+      title: 'title' in part.state ? part.state.title : undefined,
+      input: part.state.input
+    }))
 
   return {
     id: item.info.id,
     role: item.info.role === 'user' ? 'user' : 'assistant',
     content,
-    updatedAt: item.info.time?.created ?? Date.now()
+    updatedAt: item.info.time?.created ?? Date.now(),
+    tools
   }
+}
+
+function applyPermissionAsked(messages: ChatMessageRecord[], permission: PermissionRequest) {
+  const current = ensureAssistantMessage(messages, permission.tool?.messageID || permission.id)
+  current.confirmation = {
+    id: permission.id,
+    sessionId: permission.sessionID,
+    type: permission.permission,
+    patterns: permission.patterns || [],
+    metadata: permission.metadata || {},
+    callId: permission.tool?.callID
+  }
+  current.updatedAt = Date.now()
+}
+
+function applyPermissionReplied(
+  messages: ChatMessageRecord[],
+  payload: { sessionID: string; requestID: string; reply: 'once' | 'always' | 'reject' }
+) {
+  const current = messages.find((message) => message.confirmation?.id === payload.requestID)
+  if (!current?.confirmation) {
+    return
+  }
+
+  current.confirmation = {
+    ...current.confirmation,
+    response: payload.reply
+  }
+
+  if (payload.reply !== 'reject') {
+    current.confirmation = undefined
+  }
+
+  current.updatedAt = Date.now()
+}
+
+function applyQuestionAsked(messages: ChatMessageRecord[], request: QuestionRequest) {
+  const current = ensureAssistantMessage(messages, request.tool?.messageID || request.id)
+  current.question = {
+    id: request.id,
+    sessionId: request.sessionID,
+    callId: request.tool?.callID,
+    status: 'pending',
+    questions: request.questions.map((item) => ({
+      header: item.header,
+      question: item.question,
+      options: item.options.map((option) => ({
+        label: option.label,
+        description: option.description
+      })),
+      multiple: item.multiple,
+      custom: item.custom
+    }))
+  }
+  current.updatedAt = Date.now()
+}
+
+function applyQuestionAnswered(messages: ChatMessageRecord[], requestId: string, answers: QuestionAnswer[]) {
+  const current = messages.find((message) => message.question?.id === requestId)
+  if (!current?.question) {
+    return
+  }
+
+  current.question = {
+    ...current.question,
+    status: 'answered',
+    answers: answers.map((item) => [...item])
+  }
+  current.updatedAt = Date.now()
+}
+
+function applyQuestionRejected(messages: ChatMessageRecord[], requestId: string) {
+  const current = messages.find((message) => message.question?.id === requestId)
+  if (!current?.question) {
+    return
+  }
+
+  current.question = {
+    ...current.question,
+    status: 'rejected'
+  }
+  current.updatedAt = Date.now()
 }
 
 function getEventSessionId(event: OpencodeEvent) {
@@ -277,6 +424,30 @@ type MediaQueryWithLegacyListeners = MediaQueryList & {
   removeListener?: (listener: (event: MediaQueryListEvent) => void) => void
 }
 
+type ProjectCatalogEntry = {
+  projectId: string
+  directory: string
+  name: string
+  lastUpdated: number
+  icon?: ProjectIconRecord
+}
+
+function mapProjectCatalogEntry(project: Project): ProjectCatalogEntry {
+  return {
+    projectId: project.id,
+    directory: normalizeDirectory(project.worktree),
+    name: project.name || getDirectoryName(project.worktree),
+    lastUpdated: project.time.updated,
+    icon: project.icon
+      ? {
+          url: project.icon.url,
+          override: project.icon.override,
+          color: project.icon.color
+        }
+      : undefined
+  }
+}
+
 export function useOpencodeApp() {
   const serverUrl = ref(readStorage(STORAGE_KEYS.serverUrl, 'http://127.0.0.1:4096'))
   const username = ref(readStorage(STORAGE_KEYS.username, 'opencode'))
@@ -289,10 +460,12 @@ export function useOpencodeApp() {
   const selectedAgentId = ref(readStorage(STORAGE_KEYS.selectedAgent, ''))
   const selectedModelKey = ref(normalizeModelKey(readStorage(STORAGE_KEYS.selectedModel, '')))
   const composerText = ref('')
+  const selectedCommandName = ref('')
   const availableAgents = ref<ChatAgentRecord[]>([])
+  const availableCommands = ref<ChatCommandRecord[]>([])
   const availableModels = ref<ChatModelRecord[]>([])
   const sessions = ref<SessionRecord[]>([])
-  const projectCatalog = ref<Array<{ directory: string; name: string; lastUpdated: number }>>([])
+  const projectCatalog = ref<ProjectCatalogEntry[]>([])
   const messages = ref<ChatMessageRecord[]>([])
   const isConnecting = ref(false)
   const isLoadingSession = ref(false)
@@ -346,12 +519,20 @@ export function useOpencodeApp() {
     availableAgents.value.find((agent) => agent.id === selectedAgentId.value) ?? null
   )
 
+  const selectedCommand = computed(() =>
+    availableCommands.value.find((command) => command.name === selectedCommandName.value) ?? null
+  )
+
   const selectedModel = computed(() =>
     availableModels.value.find((model) => model.key === normalizeModelKey(selectedModelKey.value)) ?? null
   )
 
-  const visibleMessages = computed(() => messages.value.slice(-historyMessageLimit.value))
-  const hiddenMessageCount = computed(() => Math.max(messages.value.length - visibleMessages.value.length, 0))
+  const visibleMessages = computed(() => {
+    return messages.value.filter((message) => isRenderableMessage(message)).slice(-historyMessageLimit.value)
+  })
+  const hiddenMessageCount = computed(() => {
+    return Math.max(messages.value.filter((message) => isRenderableMessage(message)).length - visibleMessages.value.length, 0)
+  })
   const hasTruncatedMessages = computed(() => hasMoreHistory.value || hiddenMessageCount.value > 0)
 
   const projects = computed<ProjectRecord[]>(() => {
@@ -360,8 +541,10 @@ export function useOpencodeApp() {
 
     for (const project of projectCatalog.value) {
       groups.set(project.directory, {
+        projectId: project.projectId,
         directory: project.directory,
         name: project.name,
+        icon: project.icon,
         lastUpdated: project.lastUpdated,
         sessionCount: 0,
         source: 'server'
@@ -377,6 +560,8 @@ export function useOpencodeApp() {
       const existing = groups.get(directory)
       const updated = session.time?.updated ?? session.time?.created ?? 0
       if (existing) {
+        existing.projectId = existing.projectId || session.project?.id
+        existing.icon = existing.icon || session.project?.icon
         existing.sessionCount += 1
         existing.lastUpdated = Math.max(existing.lastUpdated, updated)
         if (existing.source !== 'manual') {
@@ -384,8 +569,10 @@ export function useOpencodeApp() {
         }
       } else {
         groups.set(directory, {
+          projectId: session.project?.id,
           directory,
-          name: getDirectoryName(directory),
+          name: session.project?.name || getDirectoryName(directory),
+          icon: session.project?.icon,
           lastUpdated: updated,
           sessionCount: 1,
           source: 'session'
@@ -692,13 +879,25 @@ export function useOpencodeApp() {
     const currentClient = getClient()
     const directory = normalizeDirectory(options.directory ?? chatOptionDirectory.value)
     const params = directory ? { directory } : undefined
-    const [{ data: providerData }, { data: agentData }] = await Promise.all([
+    const [{ data: providerData }, { data: agentData }, { data: scopedCommandData }, { data: globalCommandData }, { data: skillData }] =
+      await Promise.all([
       currentClient.provider.list(params),
-      currentClient.app.agents(params)
+      currentClient.app.agents(params),
+      currentClient.command.list(params),
+      currentClient.command.list(),
+      currentClient.app.skills(params)
     ])
 
     availableModels.value = buildModelCatalog((providerData ?? {}) as ProviderListResponse)
     availableAgents.value = buildAgentCatalog((agentData ?? []) as AgentInfo[])
+    availableCommands.value = buildCommandCatalog(
+      (scopedCommandData ?? []) as OpencodeCommand[],
+      (globalCommandData ?? []) as OpencodeCommand[],
+      (skillData ?? []) as SkillInfo[]
+    )
+    if (!availableCommands.value.some((command) => command.name === selectedCommandName.value)) {
+      selectedCommandName.value = ''
+    }
     applyChatSelections(options)
   }
 
@@ -718,6 +917,28 @@ export function useOpencodeApp() {
     if (availableModels.value.some((model) => model.key === nextModelKey)) {
       selectedModelKey.value = nextModelKey
     }
+  }
+
+  function selectCommand(commandName: string) {
+    const nextCommandName = commandName.trim()
+    const nextCommand = availableCommands.value.find((command) => command.name === nextCommandName) ?? null
+
+    selectedCommandName.value = nextCommandName
+    if (!nextCommand) {
+      composerMode.value = 'prompt'
+      return
+    }
+
+    if (nextCommand.category === 'skill') {
+      composerText.value = `务必使用skill：${nextCommand.name}。`
+      selectedCommandName.value = ''
+      composerMode.value = 'prompt'
+      return
+    }
+
+    composerText.value = ''
+    composerMode.value = 'command'
+    void sendCurrentMessage()
   }
 
   async function listGlobalSessions() {
@@ -791,11 +1012,7 @@ export function useOpencodeApp() {
         .sort((left, right) => (right.time?.updated ?? 0) - (left.time?.updated ?? 0))
 
       projectCatalog.value = ((projectData ?? []) as Project[])
-        .map((project) => ({
-          directory: normalizeDirectory(project.worktree),
-          name: project.name || getDirectoryName(project.worktree),
-          lastUpdated: project.time.updated
-        }))
+        .map((project) => mapProjectCatalogEntry(project))
         .filter((project) => Boolean(project.directory))
 
       sessions.value = nextSessions
@@ -816,6 +1033,36 @@ export function useOpencodeApp() {
     } finally {
       isRefreshing.value = false
     }
+  }
+
+  async function updateProject(projectId: string, input: { name?: string; icon?: ProjectIconRecord }) {
+    const normalizedProjectId = projectId.trim()
+    if (!normalizedProjectId) {
+      throw new Error('缺少项目 ID，无法更新项目配置。')
+    }
+
+    const currentClient = getClient()
+    const { data } = await currentClient.project.update({
+      projectID: normalizedProjectId,
+      name: input.name,
+      icon: input.icon
+        ? {
+            url: input.icon.url,
+            override: input.icon.override,
+            color: input.icon.color
+          }
+        : undefined
+    })
+
+    if (data) {
+      const nextProject = mapProjectCatalogEntry(data as Project)
+      projectCatalog.value = [
+        nextProject,
+        ...projectCatalog.value.filter((project) => project.projectId !== nextProject.projectId)
+      ]
+    }
+
+    return data as Project | undefined
   }
 
   async function connect() {
@@ -866,6 +1113,7 @@ export function useOpencodeApp() {
         sessionID: sessionId,
         limit: requestedLimit
       })
+      const { data: questions } = await currentClient.question.list()
       const normalizedDirectory = normalizeDirectory(session?.directory)
       const historyItems = (history ?? []) as MessageHistoryItem[]
       const historySelection = getHistorySelection(historyItems)
@@ -881,6 +1129,9 @@ export function useOpencodeApp() {
       })
 
       messages.value = pruneEmptyAssistantMessages(historyItems.map(convertHistoryMessage))
+      for (const request of ((questions ?? []) as QuestionRequest[]).filter((item) => item.sessionID === sessionId)) {
+        applyQuestionAsked(messages.value, request)
+      }
       sessionStatus.value = 'idle'
     } catch (error) {
       handleRequestError(error)
@@ -937,8 +1188,15 @@ export function useOpencodeApp() {
   }
 
   async function sendCurrentMessage() {
-    const trimmed = composerText.value.trim()
-    if (!trimmed || isSending.value) {
+    const trimmedPrompt = composerText.value.trim()
+    const selectedCommandEntry = selectedCommand.value
+    const manualCommand = !selectedCommandEntry && trimmedPrompt.startsWith('/') ? trimmedPrompt.slice(1).trim() : ''
+    const [manualCommandName, ...manualCommandArgs] = manualCommand ? manualCommand.split(/\s+/) : []
+    const commandName = selectedCommandEntry?.name || manualCommandName || ''
+    const commandArgs = manualCommandArgs.join(' ')
+    const hasCommand = Boolean(commandName)
+
+    if ((!trimmedPrompt && !hasCommand) || isSending.value) {
       return
     }
 
@@ -964,18 +1222,11 @@ export function useOpencodeApp() {
 
     try {
       const currentSessionId = selectedSessionId.value
-      const isCommand = trimmed.startsWith('/')
-      if (isCommand) {
-        const normalized = trimmed.slice(1)
-        const [command, ...rest] = normalized.split(/\s+/)
-        if (!command) {
-          throw new Error('命令不能为空。')
-        }
-
+      if (hasCommand) {
         await currentClient.session.command({
           sessionID: selectedSessionId.value,
-          command,
-          arguments: rest.join(' '),
+          command: commandName,
+          arguments: commandArgs || undefined,
           agent,
           model: model ? makeModelKey(model.providerID, model.modelID) : undefined
         })
@@ -984,17 +1235,78 @@ export function useOpencodeApp() {
           sessionID: selectedSessionId.value,
           agent,
           model,
-          parts: [{ type: 'text', text: trimmed }]
+          parts: [{ type: 'text', text: trimmedPrompt }]
         })
       }
 
-      armCompletionNotice(currentSessionId, trimmed)
+      armCompletionNotice(
+        currentSessionId,
+        hasCommand ? `/${commandName}${commandArgs ? ` ${commandArgs}` : ''}` : trimmedPrompt
+      )
       composerText.value = ''
+      selectedCommandName.value = ''
+      composerMode.value = 'prompt'
     } catch (error) {
       clearPendingCompletionNotice(selectedSessionId.value)
       handleRequestError(error)
       isSending.value = false
       sessionStatus.value = 'idle'
+    }
+  }
+
+  async function replyPermission(requestId: string, reply: 'once' | 'always' | 'reject') {
+    const normalizedRequestId = requestId.trim()
+    if (!normalizedRequestId) {
+      return
+    }
+
+    lastError.value = ''
+
+    try {
+      const currentClient = getClient()
+      await currentClient.permission.reply({
+        requestID: normalizedRequestId,
+        reply
+      })
+    } catch (error) {
+      handleRequestError(error)
+    }
+  }
+
+  async function replyQuestion(requestId: string, answers: QuestionAnswer[]) {
+    const normalizedRequestId = requestId.trim()
+    if (!normalizedRequestId) {
+      return
+    }
+
+    lastError.value = ''
+
+    try {
+      const currentClient = getClient()
+      await currentClient.question.reply({
+        requestID: normalizedRequestId,
+        answers
+      })
+    } catch (error) {
+      handleRequestError(error)
+    }
+  }
+
+  async function rejectQuestion(requestId: string) {
+    const normalizedRequestId = requestId.trim()
+    if (!normalizedRequestId) {
+      return
+    }
+
+    lastError.value = ''
+
+    try {
+      const currentClient = getClient()
+      await currentClient.question.reject({
+        requestID: normalizedRequestId
+      })
+    } catch (error) {
+      handleRequestError(error)
     }
   }
 
@@ -1014,6 +1326,15 @@ export function useOpencodeApp() {
       void maybeNotifySessionCompletion(eventSessionId)
     }
 
+    if (event.type === 'project.updated') {
+      const project = event.properties as Project
+      const nextProject = mapProjectCatalogEntry(project)
+      projectCatalog.value = [
+        nextProject,
+        ...projectCatalog.value.filter((item) => item.projectId !== nextProject.projectId)
+      ]
+    }
+
     if (event.type === 'session.error' && pendingCompletionNotice?.sessionId === eventSessionId) {
       clearPendingCompletionNotice(eventSessionId)
     }
@@ -1026,22 +1347,65 @@ export function useOpencodeApp() {
       case 'message.updated': {
         const info = (event.properties as { info: Partial<Message> & { id: string; role?: string } }).info
         if (info.role === 'user') {
-          ensureTextMessage(messages.value, info)
+          ensureChatMessage(messages.value, info)
         }
         break
       }
       case 'message.part.updated': {
         const { part } = event.properties as { part: Part & { text?: string } }
-        if (part.type !== 'text') {
-          return
+        if (part.type === 'text') {
+          const current = ensureChatMessage(messages.value, {
+            id: part.messageID,
+            role: messages.value.find((item) => item.id === part.messageID)?.role ?? 'assistant'
+          })
+          current.content = part.text ?? current.content
+          current.updatedAt = Date.now()
+          break
         }
 
-        const current = ensureTextMessage(messages.value, {
-          id: part.messageID,
-          role: messages.value.find((item) => item.id === part.messageID)?.role ?? 'assistant'
-        })
-        current.content = part.text ?? current.content
-        current.updatedAt = Date.now()
+        if (part.type === 'tool') {
+          const current = ensureAssistantMessage(messages.value, part.messageID)
+          const tools = current.tools ?? []
+          const existing = tools.find((item) => item.id === part.id)
+          const nextTool = {
+            id: part.id,
+            callId: part.callID,
+            name: part.tool,
+            status: getToolStatus(part.state.status),
+            title: 'title' in part.state ? part.state.title : undefined,
+            input: part.state.input
+          }
+
+          if (existing) {
+            Object.assign(existing, nextTool)
+          } else {
+            tools.push(nextTool)
+          }
+
+          current.tools = tools
+          current.updatedAt = Date.now()
+        }
+        break
+      }
+      case 'permission.asked': {
+        applyPermissionAsked(messages.value, event.properties as PermissionRequest)
+        break
+      }
+      case 'permission.replied': {
+        applyPermissionReplied(messages.value, event.properties as { sessionID: string; requestID: string; reply: 'once' | 'always' | 'reject' })
+        break
+      }
+      case 'question.asked': {
+        applyQuestionAsked(messages.value, event.properties as QuestionRequest)
+        break
+      }
+      case 'question.replied': {
+        const { requestID, answers } = event.properties as { requestID: string; answers: QuestionAnswer[] }
+        applyQuestionAnswered(messages.value, requestID, answers)
+        break
+      }
+      case 'question.rejected': {
+        applyQuestionRejected(messages.value, (event.properties as { requestID: string }).requestID)
         break
       }
       case 'session.status': {
@@ -1146,7 +1510,9 @@ export function useOpencodeApp() {
     selectedAgentId,
     selectedModelKey,
     composerText,
+    selectedCommandName,
     availableAgents,
+    availableCommands,
     availableModels,
     projects,
     sessions,
@@ -1154,6 +1520,7 @@ export function useOpencodeApp() {
     visibleMessages,
     activeSession,
     selectedAgent,
+    selectedCommand,
     selectedModel,
     isConnecting,
     isLoadingSession,
@@ -1179,8 +1546,13 @@ export function useOpencodeApp() {
     loadOlderMessages,
     requestNotificationPermission,
     promptInstall,
+    replyPermission,
+    replyQuestion,
+    rejectQuestion,
     selectAgent,
+    selectCommand,
     selectModel,
+    updateProject,
     sendCurrentMessage
   }
 }

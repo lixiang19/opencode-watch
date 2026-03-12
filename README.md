@@ -11,6 +11,34 @@
 
 ```bash
 npm install --cache .npm-cache
+npm link
+opchat
+```
+
+或直接：
+
+```bash
+npx . dev
+```
+
+如果后续发布到 npm，目标用法就是：
+
+```bash
+npx opchat
+# 或
+npm i -g opchat && opchat
+```
+
+发布前：
+
+```bash
+npm login
+npm publish
+```
+
+保留原来的脚本方式也可以：
+
+```bash
 npm run dev:all
 ```
 
@@ -19,6 +47,23 @@ npm run dev:all
 - 前端运行在 `http://127.0.0.1:5173`
 - `opencode serve` 运行在 `http://127.0.0.1:4096`
 - `opencode serve` 默认在 `$HOME` 启动，并自动加上浏览器访问所需的 CORS
+
+`opchat` 命令说明：
+
+- `opchat` / `opchat dev`：启动 `opencode serve` + 前端开发服务
+- `opchat web`：只启动前端开发服务
+- `opchat build`：执行构建
+- `opchat preview`：预览构建产物
+- `opchat doctor`：检查本机 `node`、`vite`、`vue-tsc`、`opencode` 和端口配置是否可用
+
+当前 CLI 会直接调用本地安装的 `vite`、`vue-tsc` 和 `opencode`，不再依赖 `npm run ...` 转发。
+
+已知限制：
+
+- 它不是独立打包的单文件 CLI，而是安装整个仓库后再跑其中的脚本
+- 运行 `opchat dev` 仍然要求本机可用 `opencode` 命令
+- `opchat build` 会先执行 `vue-tsc -b`，再执行 `vite build`
+- 当前 `package.json` 的许可证是 `UNLICENSED`，如果你打算公开分发，最好补正式 LICENSE 文件并改掉这个字段
 
 可选环境变量：
 
