@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 
+import MessagePartRenderer from '@/components/chat/MessagePartRenderer.vue'
 import Button from '@/components/ui/button/Button.vue'
 import Input from '@/components/ui/input/Input.vue'
+import { isRenderablePart } from '@/composables/useOpencodeApp/messages'
 import { useOpencodeStore } from '@/stores/opencode'
 import type { ChatMessageRecord } from '@/types/opencode'
 
@@ -12,6 +14,7 @@ const props = defineProps<{
 
 const app = useOpencodeStore()
 const isUser = computed(() => props.message.role === 'user')
+const renderableParts = computed(() => props.message.parts.filter((part) => isRenderablePart(part)))
 const questionChoices = ref<string[][]>([])
 const questionCustomInputs = ref<string[]>([])
 const isSubmittingQuestion = ref(false)
@@ -86,34 +89,34 @@ function getQuestionAnswers() {
 }
 
 async function handlePermissionReply(reply: 'once' | 'always' | 'reject') {
-  if (!props.message.confirmation?.id) {
+  if (!props.message.confirmation?.id || !props.message.confirmation.sessionId) {
     return
   }
 
-  await app.replyPermission(props.message.confirmation.id, reply)
+  await app.replyPermission(props.message.confirmation.sessionId, props.message.confirmation.id, reply)
 }
 
 async function handleQuestionSubmit() {
-  if (!props.message.question?.id || !canSubmitQuestion.value || isSubmittingQuestion.value) {
+  if (!props.message.question?.id || !props.message.question.sessionId || !canSubmitQuestion.value || isSubmittingQuestion.value) {
     return
   }
 
   isSubmittingQuestion.value = true
   try {
-    await app.replyQuestion(props.message.question.id, getQuestionAnswers())
+    await app.replyQuestion(props.message.question.sessionId, props.message.question.id, getQuestionAnswers())
   } finally {
     isSubmittingQuestion.value = false
   }
 }
 
 async function handleQuestionReject() {
-  if (!props.message.question?.id || isRejectingQuestion.value) {
+  if (!props.message.question?.id || !props.message.question.sessionId || isRejectingQuestion.value) {
     return
   }
 
   isRejectingQuestion.value = true
   try {
-    await app.rejectQuestion(props.message.question.id)
+    await app.rejectQuestion(props.message.question.sessionId, props.message.question.id)
   } finally {
     isRejectingQuestion.value = false
   }
@@ -133,7 +136,11 @@ watch(
 <template>
   <div :class="['msg-row', isUser ? 'msg-row-user' : 'msg-row-assistant']">
     <div :class="['msg-bubble', isUser ? 'msg-bubble-user' : 'msg-bubble-assistant']">
-      <p v-if="message.content" class="msg-text">{{ message.content }}</p>
+      <div v-if="renderableParts.length" class="msg-parts">
+        <MessagePartRenderer v-for="part in renderableParts" :key="part.id" :part="part" />
+      </div>
+
+      <div v-if="message.error" class="msg-error">{{ message.error }}</div>
 
       <div v-if="message.question" class="msg-question">
         <div class="msg-section-title">
@@ -266,10 +273,19 @@ watch(
   border-bottom-left-radius: 0.375rem;
 }
 
-.msg-text {
-  margin: 0;
-  font-size: 0.9375rem;
-  line-height: 1.7;
+.msg-parts {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.msg-error {
+  margin-top: 0.75rem;
+  padding: 0.75rem 0.875rem;
+  border-radius: 0.9rem;
+  background: color-mix(in srgb, #ef4444 10%, transparent);
+  color: #b42318;
+  font-size: 0.875rem;
+  line-height: 1.55;
   white-space: pre-wrap;
   word-break: break-word;
 }

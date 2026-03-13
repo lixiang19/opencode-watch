@@ -42,7 +42,7 @@ const renderableMessages = computed(() => props.messages.filter((message) => isR
 
 const messageTailSignal = computed(() => {
   const lastMessage = renderableMessages.value[renderableMessages.value.length - 1]
-  return `${lastMessage?.id || ''}:${lastMessage?.updatedAt || 0}:${lastMessage?.content.length || 0}`
+  return `${lastMessage?.id || ''}:${lastMessage?.updatedAt || 0}:${lastMessage?.parts.length || 0}`
 })
 
 const showAgentWorking = computed(() => {

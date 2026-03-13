@@ -3,6 +3,7 @@ import {
   createOpencodeClient,
   type Command as OpencodeCommand,
   type Event as OpencodeEvent,
+  type GlobalEvent as OpencodeGlobalEvent,
   type GlobalSession,
   type Project
 } from '@opencode-ai/sdk/v2/client'
@@ -104,7 +105,7 @@ export function useOpencodeApp() {
   const hasMoreHistory = ref(false)
   const sessionListUiState = ref<Record<string, SessionListUiState>>({})
 
-  let client: OpencodeClient | null = null
+  const clientCache = new Map<string, OpencodeClient>()
   let closeStream: (() => void) | null = null
   const chatOptionsCache = new Map<string, ChatOptionsSnapshot>()
   const chatOptionsRequests = new Map<string, Promise<ChatOptionsSnapshot>>()
@@ -270,6 +271,7 @@ export function useOpencodeApp() {
     isSending,
     lastError,
     messages,
+    sessions,
     selectedAgent,
     selectedCommand,
     selectedCommandName,
@@ -311,6 +313,7 @@ export function useOpencodeApp() {
   function invalidateAuth() {
     authValidated.value = false
     streamReady.value = false
+    clientCache.clear()
     chatOptionsCache.clear()
     chatOptionsRequests.clear()
     availableAgents.value = []
@@ -319,7 +322,6 @@ export function useOpencodeApp() {
     desktopSessions.value = {}
     closeStream?.()
     closeStream = null
-    client = null
   }
 
   function handleRequestError(error: unknown) {
@@ -381,8 +383,8 @@ export function useOpencodeApp() {
   }
 
   async function fetchChatOptionsSnapshot(directory?: string) {
-    const currentClient = getClient()
     const normalizedDirectory = normalizeDirectory(directory)
+    const currentClient = getClient(normalizedDirectory)
     const params = normalizedDirectory ? { directory: normalizedDirectory } : undefined
     const [{ data: providerData }, { data: agentData }, { data: scopedCommandData }, { data: globalCommandData }, { data: skillData }] =
       await Promise.all([
@@ -566,17 +568,22 @@ export function useOpencodeApp() {
     return ((await response.json()) as GlobalSession[]).map((session) => mapGlobalSession(session))
   }
 
-  function getClient() {
-    if (!client) {
-      const headers = getRequestHeaders()
-
-      client = createOpencodeClient({
-        baseUrl: serverUrl.value,
-        headers
-      })
+  function getClient(directory?: string) {
+    const normalizedDirectory = normalizeDirectory(directory)
+    const cacheKey = normalizedDirectory || '__global__'
+    const cachedClient = clientCache.get(cacheKey)
+    if (cachedClient) {
+      return cachedClient
     }
 
-    return client
+    const nextClient = createOpencodeClient({
+      baseUrl: serverUrl.value,
+      headers: getRequestHeaders(),
+      directory: normalizedDirectory || undefined
+    })
+
+    clientCache.set(cacheKey, nextClient)
+    return nextClient
   }
 
   async function startEventStream() {
@@ -584,10 +591,13 @@ export function useOpencodeApp() {
     closeStream = null
 
     const currentClient = getClient()
-    const events = await currentClient.event.subscribe()
+    const events = await currentClient.global.event()
     const maybeClose = (events as { close?: () => void }).close
 
+    console.log('[opencode:sse] subscribed to global stream')
+
     closeStream = () => {
+      console.log('[opencode:sse] closing stream')
       if (typeof maybeClose === 'function') {
         maybeClose.call(events)
       }
@@ -599,9 +609,18 @@ export function useOpencodeApp() {
     void (async () => {
       try {
         for await (const event of events.stream) {
-          handleEvent(event as OpencodeEvent)
+          const typedGlobalEvent = event as OpencodeGlobalEvent
+          const typedEvent = typedGlobalEvent.payload
+          console.log('[opencode:sse] event', {
+            directory: typedGlobalEvent.directory,
+            type: typedEvent.type,
+            sessionId: getEventSessionId(typedEvent),
+            properties: typedEvent.properties
+          })
+          handleEvent(typedEvent)
         }
       } catch (error) {
+        console.error('[opencode:sse] stream error', error)
         handleRequestError(error)
         streamReady.value = false
       }
@@ -690,7 +709,7 @@ export function useOpencodeApp() {
 
     isConnecting.value = true
     lastError.value = ''
-    client = null
+    clientCache.clear()
 
     try {
       const currentClient = getClient()

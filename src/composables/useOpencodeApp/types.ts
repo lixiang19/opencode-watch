@@ -30,7 +30,7 @@ export type SessionListFlag = 'isNew' | 'justCompleted'
 export type SessionListUiState = Partial<Record<SessionListFlag, boolean>>
 
 export type MessageHistoryItem = { info: Message; parts: Part[] }
-export type ChatToolStatus = NonNullable<ChatMessageRecord['tools']>[number]['status']
+export type ChatToolStatus = 'pending' | 'running' | 'completed' | 'failed'
 
 export type ProviderModelInfo = {
   id: string

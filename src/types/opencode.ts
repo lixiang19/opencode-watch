@@ -1,3 +1,5 @@
+import type { Message, Part } from '@opencode-ai/sdk/v2/client'
+
 export interface SessionTimeMeta {
   created?: number
   updated?: number
@@ -39,17 +41,10 @@ export interface ProjectRecord {
 
 export interface ChatMessageRecord {
   id: string
-  role: 'user' | 'assistant'
-  content: string
+  role: Message['role']
+  parts: Part[]
   updatedAt?: number
-  tools?: Array<{
-    id: string
-    callId: string
-    name: string
-    status: 'pending' | 'running' | 'completed' | 'failed'
-    title?: string
-    input?: Record<string, unknown>
-  }>
+  error?: string
   confirmation?: {
     id: string
     sessionId: string
@@ -76,6 +71,7 @@ export interface ChatMessageRecord {
     }>
     answers?: string[][]
   }
+  _pendingPartDeltas?: Record<string, Array<{ field: string; delta: string }>>
 }
 
 export interface ChatModelRecord {

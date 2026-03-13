@@ -15,7 +15,7 @@ import type {
   DesktopSessionState
 } from '@/types/opencode'
 
-type ClientFactory = () => ReturnType<typeof import('@opencode-ai/sdk/v2/client').createOpencodeClient>
+type ClientFactory = (directory?: string) => ReturnType<typeof import('@opencode-ai/sdk/v2/client').createOpencodeClient>
 
 export function createSessionActions(args: {
   availableAgents: Ref<ChatAgentRecord[]>
@@ -31,6 +31,7 @@ export function createSessionActions(args: {
   isSending: Ref<boolean>
   lastError: Ref<string>
   messages: Ref<ChatMessageRecord[]>
+  sessions: Ref<Array<{ id: string; directory?: string | null }>>
   selectedAgent: ComputedRef<ChatAgentRecord | null>
   selectedCommand: ComputedRef<ChatCommandRecord | null>
   selectedCommandName: Ref<string>
@@ -55,15 +56,25 @@ export function createSessionActions(args: {
   ) => void
   syncSessionPreviewFromMessages: (sessionId: string, nextMessages: ChatMessageRecord[]) => void
 }) {
+  function getSessionDirectory(sessionId?: string) {
+    if (!sessionId) {
+      return ''
+    }
+
+    return normalizeDirectory(args.sessions.value.find((item) => item.id === sessionId)?.directory)
+  }
+
   async function fetchSessionRuntimeData(sessionId: string, messageLimit: number) {
-    const currentClient = args.getClient()
+    const directory = getSessionDirectory(sessionId)
+    const currentClient = args.getClient(directory)
     const [{ data: session }, { data: history }, { data: questions }] = await Promise.all([
-      currentClient.session.get({ sessionID: sessionId }),
+      currentClient.session.get({ sessionID: sessionId, directory: directory || undefined }),
       currentClient.session.messages({
         sessionID: sessionId,
+        directory: directory || undefined,
         limit: messageLimit
       }),
-      currentClient.question.list()
+      currentClient.question.list({ directory: directory || undefined })
     ])
 
     const historyItems = (history ?? []) as MessageHistoryItem[]
@@ -75,7 +86,7 @@ export function createSessionActions(args: {
     }
 
     return {
-      normalizedDirectory: normalizeDirectory(session?.directory),
+      normalizedDirectory: normalizeDirectory(session?.directory || directory),
       historyItems,
       messages: nextMessages,
       historySelection: getHistorySelection(historyItems)
@@ -220,7 +231,7 @@ export function createSessionActions(args: {
     args.draftDirectory.value = directory
 
     try {
-      const currentClient = args.getClient()
+      const currentClient = args.getClient(directory)
       const { data: session } = await currentClient.session.create({ directory })
       if (!session) {
         throw new Error('创建会话失败。')
@@ -249,9 +260,11 @@ export function createSessionActions(args: {
     }
 
     try {
-      const currentClient = args.getClient()
+      const directory = getSessionDirectory(sessionId)
+      const currentClient = args.getClient(directory)
       const { data: history } = await currentClient.session.messages({
         sessionID: sessionId,
+        directory: directory || undefined,
         limit: Math.max(options.limit ?? 24, 12)
       })
       const preview = pruneEmptyAssistantMessages(((history ?? []) as MessageHistoryItem[]).map(convertHistoryMessage))
@@ -291,7 +304,8 @@ export function createSessionActions(args: {
       return
     }
 
-    const currentClient = args.getClient()
+    const directory = getSessionDirectory(args.selectedSessionId.value)
+    const currentClient = args.getClient(directory)
     const model = args.selectedModel.value
       ? {
           providerID: args.selectedModel.value.providerId,
@@ -308,6 +322,7 @@ export function createSessionActions(args: {
       if (hasCommand) {
         await currentClient.session.command({
           sessionID: args.selectedSessionId.value,
+          directory: directory || undefined,
           command: commandName,
           arguments: commandArgs || undefined,
           agent,
@@ -316,6 +331,7 @@ export function createSessionActions(args: {
       } else {
         await currentClient.session.prompt({
           sessionID: args.selectedSessionId.value,
+          directory: directory || undefined,
           agent,
           model,
           parts: [{ type: 'text', text: trimmedPrompt }]
@@ -363,7 +379,8 @@ export function createSessionActions(args: {
         }
       : undefined
     const agent = sessionState.availableAgents.find((item) => item.id === sessionState.selectedAgentId)?.id || undefined
-    const currentClient = args.getClient()
+    const directory = getSessionDirectory(sessionId)
+    const currentClient = args.getClient(directory)
 
     sessionState.isSending = true
     sessionState.sessionStatus = 'busy'
@@ -373,6 +390,7 @@ export function createSessionActions(args: {
       if (hasCommand) {
         await currentClient.session.command({
           sessionID: sessionId,
+          directory: directory || undefined,
           command: commandName,
           arguments: commandArgs || undefined,
           agent,
@@ -381,6 +399,7 @@ export function createSessionActions(args: {
       } else {
         await currentClient.session.prompt({
           sessionID: sessionId,
+          directory: directory || undefined,
           agent,
           model,
           parts: [{ type: 'text', text: trimmedPrompt }]
@@ -434,7 +453,7 @@ export function createSessionActions(args: {
     args.removeDesktopSessionState(sessionId)
   }
 
-  async function replyPermission(requestId: string, reply: 'once' | 'always' | 'reject') {
+  async function replyPermission(sessionId: string, requestId: string, reply: 'once' | 'always' | 'reject') {
     const normalizedRequestId = requestId.trim()
     if (!normalizedRequestId) {
       return
@@ -443,8 +462,10 @@ export function createSessionActions(args: {
     args.lastError.value = ''
 
     try {
-      const currentClient = args.getClient()
+      const directory = getSessionDirectory(sessionId)
+      const currentClient = args.getClient(directory)
       await currentClient.permission.reply({
+        directory: directory || undefined,
         requestID: normalizedRequestId,
         reply
       })
@@ -453,7 +474,7 @@ export function createSessionActions(args: {
     }
   }
 
-  async function replyQuestion(requestId: string, answers: QuestionAnswer[]) {
+  async function replyQuestion(sessionId: string, requestId: string, answers: QuestionAnswer[]) {
     const normalizedRequestId = requestId.trim()
     if (!normalizedRequestId) {
       return
@@ -462,8 +483,10 @@ export function createSessionActions(args: {
     args.lastError.value = ''
 
     try {
-      const currentClient = args.getClient()
+      const directory = getSessionDirectory(sessionId)
+      const currentClient = args.getClient(directory)
       await currentClient.question.reply({
+        directory: directory || undefined,
         requestID: normalizedRequestId,
         answers
       })
@@ -472,7 +495,7 @@ export function createSessionActions(args: {
     }
   }
 
-  async function rejectQuestion(requestId: string) {
+  async function rejectQuestion(sessionId: string, requestId: string) {
     const normalizedRequestId = requestId.trim()
     if (!normalizedRequestId) {
       return
@@ -481,8 +504,10 @@ export function createSessionActions(args: {
     args.lastError.value = ''
 
     try {
-      const currentClient = args.getClient()
+      const directory = getSessionDirectory(sessionId)
+      const currentClient = args.getClient(directory)
       await currentClient.question.reject({
+        directory: directory || undefined,
         requestID: normalizedRequestId
       })
     } catch (error) {

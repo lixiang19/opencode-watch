@@ -21,6 +21,23 @@ import { useOpencodeStore } from '@/stores/opencode'
 const app = useOpencodeStore()
 
 const connectionTone = computed(() => (app.streamReady ? 'status-ok' : 'status-error'))
+const serverEndpoint = computed(() => {
+  try {
+    const url = new URL(app.serverUrl)
+    return {
+      origin: url.origin,
+      host: url.hostname,
+      port: url.port || (url.protocol === 'https:' ? '443' : '80')
+    }
+  } catch {
+    return {
+      origin: app.serverUrl,
+      host: '--',
+      port: '--'
+    }
+  }
+})
+
 const notificationTone = computed(() => {
   if (!app.notificationSupported) {
     return 'status-muted'
@@ -105,6 +122,37 @@ const installStatusText = computed(() => {
 
         <!-- 基础配置卡片 -->
         <Card class="form-card">
+          <div class="form-section">
+            <div class="section-header">
+              <Link2 class="h-4 w-4" />
+              <span>服务连接</span>
+            </div>
+            <div class="form-group">
+              <label>opencode 地址</label>
+              <Input v-model="app.serverUrl" placeholder="http://127.0.0.1:4096" autocomplete="url" />
+            </div>
+            <div class="endpoint-grid">
+              <div class="endpoint-tile">
+                <span class="endpoint-label">当前地址</span>
+                <strong>{{ serverEndpoint.origin }}</strong>
+              </div>
+              <div class="endpoint-tile">
+                <span class="endpoint-label">主机</span>
+                <strong>{{ serverEndpoint.host }}</strong>
+              </div>
+              <div class="endpoint-tile">
+                <span class="endpoint-label">端口</span>
+                <strong>{{ serverEndpoint.port }}</strong>
+              </div>
+            </div>
+            <div class="form-hint">
+              <Info class="h-3 w-3" />
+              <span>会话列表和实时推送只来自当前连接的这一个 opencode 服务实例。</span>
+            </div>
+          </div>
+
+          <div class="section-divider"></div>
+
           <div class="form-section">
             <div class="section-header">
               <User class="h-4 w-4" />
@@ -381,6 +429,32 @@ const installStatusText = computed(() => {
   font-size: 0.75rem;
 }
 
+.endpoint-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.endpoint-tile {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.875rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 0.875rem;
+  background: color-mix(in srgb, var(--muted) 28%, var(--card));
+}
+
+.endpoint-label {
+  font-size: 0.75rem;
+  color: var(--muted-foreground);
+}
+
+.endpoint-tile strong {
+  font-size: 0.9375rem;
+  line-height: 1.35;
+  word-break: break-all;
+}
+
 .section-divider {
   height: 1px;
   background: var(--border);
@@ -475,6 +549,10 @@ const installStatusText = computed(() => {
 }
 
 @media (max-width: 640px) {
+  .endpoint-grid {
+    grid-template-columns: 1fr;
+  }
+
   .action-grid {
     grid-template-columns: 1fr;
   }
