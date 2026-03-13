@@ -62,8 +62,8 @@ import type {
 import type {
   AgentInfo,
   ChatOptionsSnapshot,
+  ConfigProvidersResponse,
   ProjectCatalogEntry,
-  ProviderListResponse,
   SessionListUiState,
   SkillInfo
 } from '@/composables/useOpencodeApp/types'
@@ -386,7 +386,7 @@ export function useOpencodeApp() {
     const params = normalizedDirectory ? { directory: normalizedDirectory } : undefined
     const [{ data: providerData }, { data: agentData }, { data: scopedCommandData }, { data: globalCommandData }, { data: skillData }] =
       await Promise.all([
-        currentClient.provider.list(params),
+        currentClient.config.providers(params),
         currentClient.app.agents(params),
         currentClient.command.list(params),
         currentClient.command.list(),
@@ -394,7 +394,7 @@ export function useOpencodeApp() {
       ])
 
     return {
-      models: buildModelCatalog((providerData ?? {}) as ProviderListResponse),
+      models: buildModelCatalog((providerData ?? {}) as ConfigProvidersResponse),
       agents: buildAgentCatalog((agentData ?? []) as AgentInfo[]),
       commands: buildCommandCatalog(
         (scopedCommandData ?? []) as OpencodeCommand[],

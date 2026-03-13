@@ -14,16 +14,14 @@ import type {
   AgentInfo,
   ChatOptionsSnapshot,
   ChatSelectionOptions,
+  ConfigProvidersResponse,
   MessageHistoryItem,
   ProjectCatalogEntry,
-  ProviderListResponse,
   SkillInfo
 } from './types'
 
-export function buildModelCatalog(response?: ProviderListResponse) {
-  const connectedProviders = new Set(response?.connected ?? [])
-
-  return (response?.all ?? [])
+export function buildModelCatalog(response?: ConfigProvidersResponse) {
+  return (response?.providers ?? [])
     .flatMap((provider) => {
       return Object.values(provider.models ?? {})
         .filter((model) => model.status !== 'deprecated')
@@ -37,12 +35,6 @@ export function buildModelCatalog(response?: ProviderListResponse) {
         }))
     })
     .sort((left, right) => {
-      const leftConnected = connectedProviders.has(left.providerId) ? 0 : 1
-      const rightConnected = connectedProviders.has(right.providerId) ? 0 : 1
-      if (leftConnected !== rightConnected) {
-        return leftConnected - rightConnected
-      }
-
       const providerCompare = left.providerName.localeCompare(right.providerName)
       if (providerCompare !== 0) {
         return providerCompare
@@ -54,7 +46,7 @@ export function buildModelCatalog(response?: ProviderListResponse) {
 
 export function buildAgentCatalog(input?: AgentInfo[]) {
   return (input ?? [])
-    .filter((agent) => !agent.hidden)
+    .filter((agent) => !agent.hidden && agent.mode !== 'subagent')
     .map<ChatAgentRecord>((agent) => ({
       id: agent.name,
       description: agent.description || '',
@@ -78,22 +70,23 @@ export function buildCommandCatalog(
 ) {
   const globalNames = new Set(globalCommands.map((command) => command.name))
   const skillNames = new Set(skills.map((skill) => skill.name))
+  const entries = new Map<string, ChatCommandRecord>()
 
-  return scopedCommands
-    .map<ChatCommandRecord>((command) => {
-      const isSkill = command.source === 'skill' || skillNames.has(command.name)
-      const category = isSkill ? 'skill' : globalNames.has(command.name) ? 'system' : 'custom'
+  for (const command of [...globalCommands, ...scopedCommands]) {
+    const isSkill = command.source === 'skill' || skillNames.has(command.name)
+    const category = isSkill ? 'skill' : globalNames.has(command.name) ? 'system' : 'custom'
 
-      return {
-        name: command.name,
-        description: command.description || '',
-        template: command.template,
-        hints: command.hints ?? [],
-        source: command.source,
-        category
-      }
+    entries.set(command.name, {
+      name: command.name,
+      description: command.description || '',
+      template: command.template,
+      hints: command.hints ?? [],
+      source: command.source,
+      category
     })
-    .sort((left, right) => left.name.localeCompare(right.name))
+  }
+
+  return [...entries.values()].sort((left, right) => left.name.localeCompare(right.name))
 }
 
 export function createDesktopSessionState(sessionId: string): DesktopSessionState {

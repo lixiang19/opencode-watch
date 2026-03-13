@@ -4,6 +4,7 @@ import { LoaderCircle } from 'lucide-vue-next'
 
 import Badge from '@/components/ui/badge/Badge.vue'
 import MessageBubble from '@/components/chat/MessageBubble.vue'
+import { isRenderableMessage } from '@/composables/useOpencodeApp/messages'
 import type { ChatMessageRecord } from '@/types/opencode'
 
 const props = withDefaults(
@@ -37,19 +38,15 @@ const props = withDefaults(
 )
 
 const streamEl = ref<HTMLElement>()
+const renderableMessages = computed(() => props.messages.filter((message) => isRenderableMessage(message)))
 
 const messageTailSignal = computed(() => {
-  const lastMessage = props.messages[props.messages.length - 1]
+  const lastMessage = renderableMessages.value[renderableMessages.value.length - 1]
   return `${lastMessage?.id || ''}:${lastMessage?.updatedAt || 0}:${lastMessage?.content.length || 0}`
 })
 
 const showAgentWorking = computed(() => {
-  if (!props.showWorkingIndicator || props.isLoading || !props.busy) {
-    return false
-  }
-
-  const lastMessage = props.messages[props.messages.length - 1]
-  return !lastMessage || lastMessage.role === 'user'
+  return Boolean(props.showWorkingIndicator && !props.isLoading)
 })
 
 function scrollToBottom() {
@@ -61,6 +58,14 @@ function scrollToBottom() {
 }
 
 watch(messageTailSignal, (value, previousValue) => {
+  if (!value || value === previousValue) {
+    return
+  }
+
+  scrollToBottom()
+})
+
+watch(showAgentWorking, (value, previousValue) => {
   if (!value || value === previousValue) {
     return
   }
@@ -109,8 +114,8 @@ watch(messageTailSignal, (value, previousValue) => {
         <span>恢复历史消息…</span>
       </div>
 
-      <template v-if="messages.length">
-        <MessageBubble v-for="msg in messages" :key="msg.id" :message="msg" />
+      <template v-if="renderableMessages.length">
+        <MessageBubble v-for="msg in renderableMessages" :key="msg.id" :message="msg" />
       </template>
 
       <div v-else class="chat-placeholder-row">
@@ -122,8 +127,8 @@ watch(messageTailSignal, (value, previousValue) => {
           <LoaderCircle class="h-3.5 w-3.5 animate-spin" />
         </div>
         <div class="chat-working-body">
-          <strong>Agent 正在处理</strong>
-          <span>正在分析上下文、调用工具或整理回复…</span>
+          <strong>正在工作</strong>
+          <span>当前工具执行中，完成后会继续返回结果。</span>
         </div>
       </div>
     </div>

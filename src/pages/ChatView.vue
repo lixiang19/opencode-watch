@@ -6,6 +6,7 @@ import { useRoute, useRouter } from 'vue-router'
 import Button from '@/components/ui/button/Button.vue'
 import ChatComposer from '@/components/chat/ChatComposer.vue'
 import ChatPane from '@/components/chat/ChatPane.vue'
+import { hasActiveToolCall } from '@/composables/useOpencodeApp/messages'
 import { useOpencodeStore } from '@/stores/opencode'
 
 const route = useRoute()
@@ -17,8 +18,7 @@ const showAgentWorking = computed(() => {
     return false
   }
 
-  const lastMessage = app.visibleMessages[app.visibleMessages.length - 1]
-  return !lastMessage || lastMessage.role === 'user'
+  return hasActiveToolCall(app.messages)
 })
 
 async function syncSession(sessionId?: string | string[]) {

@@ -44,9 +44,9 @@ export type ProviderInfo = {
   models?: Record<string, ProviderModelInfo>
 }
 
-export type ProviderListResponse = {
-  all?: ProviderInfo[]
-  connected?: string[]
+export type ConfigProvidersResponse = {
+  providers?: ProviderInfo[]
+  default?: Record<string, string>
 }
 
 export type AgentInfo = {

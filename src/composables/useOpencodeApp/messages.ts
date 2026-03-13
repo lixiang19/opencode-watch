@@ -37,6 +37,12 @@ export function isRenderableMessage(message: ChatMessageRecord) {
   return Boolean(message.role === 'user' || message.content.trim() || message.confirmation || message.question)
 }
 
+export function hasActiveToolCall(messages: ChatMessageRecord[]) {
+  return messages.some((message) =>
+    (message.tools ?? []).some((tool) => tool.status === 'pending' || tool.status === 'running')
+  )
+}
+
 export function pruneEmptyAssistantMessages(messages: ChatMessageRecord[]) {
   return messages.filter((message) => isRenderableMessage(message))
 }

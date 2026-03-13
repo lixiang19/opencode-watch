@@ -5,6 +5,7 @@ import { FolderSync, LoaderCircle, Sparkles, X } from 'lucide-vue-next'
 import Button from '@/components/ui/button/Button.vue'
 import ChatComposer from '@/components/chat/ChatComposer.vue'
 import ChatPane from '@/components/chat/ChatPane.vue'
+import { hasActiveToolCall } from '@/composables/useOpencodeApp/messages'
 import ConversationListView from '@/pages/ConversationListView.vue'
 import ProjectsView from '@/pages/ProjectsView.vue'
 import { useOpencodeStore } from '@/stores/opencode'
@@ -44,6 +45,15 @@ function getDesktopSessionState(sessionId: string) {
 
 function getWindowMessages(sessionId: string) {
   return getDesktopSessionState(sessionId)?.messages || app.sessionPreviewMessages[sessionId] || []
+}
+
+function showPanelWorkingIndicator(sessionId: string) {
+  const sessionState = getDesktopSessionState(sessionId)
+  if (!sessionState || sessionState.isLoadingSession || sessionState.sessionStatus !== 'busy') {
+    return false
+  }
+
+  return hasActiveToolCall(sessionState.messages)
 }
 
 async function openPanel(sessionId: string) {
@@ -195,7 +205,7 @@ watch(
               :last-error="getDesktopSessionState(session.id)?.lastError || ''"
               :has-truncated-messages="getDesktopSessionState(session.id)?.hasMoreHistory"
               :history-limit="getDesktopSessionState(session.id)?.historyMessageLimit || 0"
-              :show-working-indicator="true"
+              :show-working-indicator="showPanelWorkingIndicator(session.id)"
               empty-text="暂无消息"
             >
               <template #trailing>
