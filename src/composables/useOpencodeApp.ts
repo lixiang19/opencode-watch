@@ -138,7 +138,9 @@ export function useOpencodeApp() {
   )
 
   const visibleMessages = computed(() => {
-    return messages.value.filter((message) => isRenderableMessage(message)).slice(-historyMessageLimit.value)
+    return messages.value
+      .filter((message) => isRenderableMessage(message) || message.parts.some((p) => p.type === 'patch' || p.type === 'tool' || p.type === 'reasoning'))
+      .slice(-historyMessageLimit.value)
   })
   const hiddenMessageCount = computed(() => {
     return Math.max(messages.value.filter((message) => isRenderableMessage(message)).length - visibleMessages.value.length, 0)
@@ -707,6 +709,10 @@ export function useOpencodeApp() {
       return false
     }
 
+    if (isConnecting.value) {
+      return false
+    }
+
     isConnecting.value = true
     lastError.value = ''
     clientCache.clear()
@@ -715,9 +721,21 @@ export function useOpencodeApp() {
       const currentClient = getClient()
       await currentClient.global.health()
       await startEventStream()
-      await loadChatOptions()
-      await refreshSessions()
       authValidated.value = true
+
+      void Promise.allSettled([
+        loadChatOptions(),
+        refreshSessions({ reopen: false })
+      ]).then((results) => {
+        const rejected = results.find(
+          (result): result is PromiseRejectedResult => result.status === 'rejected'
+        )
+
+        if (rejected) {
+          handleRequestError(rejected.reason)
+        }
+      })
+
       return true
     } catch (error) {
       handleRequestError(error)

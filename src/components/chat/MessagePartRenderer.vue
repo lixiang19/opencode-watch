@@ -164,38 +164,6 @@ function formatBool(value: boolean) {
     </div>
   </details>
 
-  <div v-else-if="part.type === 'step-start'" class="msg-chip-row">
-    <span class="msg-chip">步骤开始</span>
-    <span v-if="part.snapshot" class="msg-chip-secondary">snapshot: {{ part.snapshot }}</span>
-  </div>
-
-  <div v-else-if="part.type === 'step-finish'" class="msg-panel msg-panel-muted">
-    <div class="msg-panel-title">步骤完成</div>
-    <div class="msg-grid">
-      <div><span class="msg-key">原因</span><span class="msg-val">{{ part.reason }}</span></div>
-      <div><span class="msg-key">成本</span><span class="msg-val">{{ part.cost }}</span></div>
-      <div><span class="msg-key">输入 Tokens</span><span class="msg-val">{{ part.tokens.input }}</span></div>
-      <div><span class="msg-key">输出 Tokens</span><span class="msg-val">{{ part.tokens.output }}</span></div>
-      <div><span class="msg-key">推理 Tokens</span><span class="msg-val">{{ part.tokens.reasoning }}</span></div>
-      <div v-if="part.snapshot"><span class="msg-key">快照</span><span class="msg-val">{{ part.snapshot }}</span></div>
-    </div>
-  </div>
-
-  <div v-else-if="part.type === 'snapshot'" class="msg-chip-row">
-    <span class="msg-chip">快照</span>
-    <span class="msg-chip-secondary">{{ part.snapshot }}</span>
-  </div>
-
-  <div v-else-if="part.type === 'patch'" class="msg-panel msg-panel-muted">
-    <div class="msg-panel-title">补丁</div>
-    <div class="msg-grid">
-      <div><span class="msg-key">Hash</span><span class="msg-val">{{ part.hash }}</span></div>
-    </div>
-    <ul class="msg-list">
-      <li v-for="file in part.files" :key="file">{{ file }}</li>
-    </ul>
-  </div>
-
   <div v-else-if="part.type === 'agent'" class="msg-chip-row">
     <span class="msg-chip">Agent</span>
     <span class="msg-chip-secondary">{{ part.name }}</span>

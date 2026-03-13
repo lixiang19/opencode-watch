@@ -5,6 +5,7 @@ import { LoaderCircle } from 'lucide-vue-next'
 import Badge from '@/components/ui/badge/Badge.vue'
 import MessageBubble from '@/components/chat/MessageBubble.vue'
 import { isRenderableMessage } from '@/composables/useOpencodeApp/messages'
+import type { Part } from '@opencode-ai/sdk/v2/client'
 import type { ChatMessageRecord } from '@/types/opencode'
 
 const props = withDefaults(
@@ -39,6 +40,29 @@ const props = withDefaults(
 
 const streamEl = ref<HTMLElement>()
 const renderableMessages = computed(() => props.messages.filter((message) => isRenderableMessage(message)))
+const patchParts = computed(() =>
+  props.messages.flatMap((msg) =>
+    msg.parts.filter((p): p is Extract<Part, { type: 'patch' }> => p.type === 'patch')
+  )
+)
+const patchFiles = computed(() => [...new Set(patchParts.value.flatMap((p) => p.files))])
+
+type ActivityItem = Extract<Part, { type: 'tool' }> | Extract<Part, { type: 'reasoning' }>
+const activityItems = computed(() =>
+  props.messages.flatMap((msg) =>
+    msg.parts.filter((p): p is ActivityItem => p.type === 'tool' || p.type === 'reasoning')
+  )
+)
+
+function toolStatusLabel(status: string) {
+  switch (status) {
+    case 'pending':   return '等待中'
+    case 'running':   return '执行中'
+    case 'completed': return '已完成'
+    case 'error':     return '失败'
+    default:          return status
+  }
+}
 
 const messageTailSignal = computed(() => {
   const lastMessage = renderableMessages.value[renderableMessages.value.length - 1]
@@ -133,6 +157,28 @@ watch(showAgentWorking, (value, previousValue) => {
       </div>
     </div>
 
+    <details v-if="activityItems.length" class="chat-activity-panel">
+      <summary class="activity-summary">活动 · {{ activityItems.length }} 项</summary>
+      <ul class="activity-list soft-scrollbar">
+        <li v-for="item in activityItems" :key="item.id" class="activity-item">
+          <span class="activity-tag" :class="item.type === 'reasoning' ? 'activity-tag-reasoning' : 'activity-tag-tool'">
+            {{ item.type === 'reasoning' ? '思考' : '工具' }}
+          </span>
+          <span class="activity-name">{{ item.type === 'tool' ? item.tool : '思考过程' }}</span>
+          <span v-if="item.type === 'tool'" class="activity-status" :class="`activity-status-${item.state.status}`">
+            {{ toolStatusLabel(item.state.status) }}
+          </span>
+        </li>
+      </ul>
+    </details>
+
+    <details v-if="patchFiles.length" class="chat-patches-panel">
+      <summary class="patches-summary">补丁 · {{ patchFiles.length }} 个文件</summary>
+      <ul class="patch-files soft-scrollbar">
+        <li v-for="file in patchFiles" :key="file">{{ file }}</li>
+      </ul>
+    </details>
+
     <div class="chat-composer-slot">
       <slot name="composer" />
     </div>
@@ -142,7 +188,7 @@ watch(showAgentWorking, (value, previousValue) => {
 <style scoped>
 .chat-layout {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr) auto auto auto;
   height: calc(100dvh - var(--tabbar-height, 0px));
   min-height: 0;
   background: var(--background);
@@ -345,6 +391,132 @@ watch(showAgentWorking, (value, previousValue) => {
 
 .chat-composer-slot {
   min-height: 0;
+}
+
+.chat-activity-panel {
+  border-top: 1px solid var(--border);
+  background: var(--card);
+}
+
+.activity-summary {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.5rem 1.125rem;
+  cursor: pointer;
+  color: var(--muted-foreground);
+  font-size: 0.78rem;
+  font-weight: 500;
+  user-select: none;
+  list-style: none;
+}
+
+.activity-summary:hover {
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--muted) 40%, transparent);
+}
+
+.activity-list {
+  margin: 0;
+  padding: 0.25rem 1.125rem 0.625rem;
+  max-height: 12rem;
+  overflow-y: auto;
+  display: grid;
+  gap: 0.2rem;
+  list-style: none;
+}
+
+.activity-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.2rem 0;
+}
+
+.activity-tag {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  height: 1.25rem;
+  padding: 0 0.4rem;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 600;
+}
+
+.activity-tag-tool {
+  background: color-mix(in srgb, var(--primary) 14%, transparent);
+  color: var(--primary);
+}
+
+.activity-tag-reasoning {
+  background: color-mix(in srgb, var(--muted-foreground) 14%, transparent);
+  color: var(--muted-foreground);
+}
+
+.activity-name {
+  flex: 1;
+  overflow: hidden;
+  color: var(--foreground);
+  font-size: 0.78rem;
+  font-family: monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.activity-status {
+  flex-shrink: 0;
+  font-size: 0.72rem;
+  color: var(--muted-foreground);
+}
+
+.activity-status-running {
+  color: var(--primary);
+}
+
+.activity-status-error {
+  color: var(--destructive);
+}
+
+.chat-patches-panel {
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  background: var(--card);
+}
+
+.patches-summary {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.5rem 1.125rem;
+  cursor: pointer;
+  color: var(--muted-foreground);
+  font-size: 0.78rem;
+  font-weight: 500;
+  user-select: none;
+  list-style: none;
+}
+
+.patches-summary:hover {
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--muted) 40%, transparent);
+}
+
+.patch-files {
+  margin: 0;
+  padding: 0.375rem 1.125rem 0.625rem 1.5rem;
+  max-height: 10rem;
+  overflow-y: auto;
+  display: grid;
+  gap: 0.2rem;
+  list-style: none;
+}
+
+.patch-files li {
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+  font-family: monospace;
+  word-break: break-all;
 }
 
 @keyframes pulse-dot {

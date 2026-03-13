@@ -403,6 +403,9 @@ const editingPreviewIcon = computed(() => iconOverrideDraft.value || editingProj
 </template>
 
 <style scoped>
+/* ─────────────────────────────────────────
+   布局容器
+───────────────────────────────────────── */
 .projects-container {
   display: flex;
   flex-direction: column;
@@ -411,138 +414,202 @@ const editingPreviewIcon = computed(() => iconOverrideDraft.value || editingProj
   color: var(--foreground);
 }
 
+/* ─────────────────────────────────────────
+   顶部标题栏
+───────────────────────────────────────── */
 .projects-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 1.5rem 1.25rem 1rem;
+  padding: 1.75rem 1.5rem 1.25rem;
   position: sticky;
   top: 0;
   z-index: 10;
   background: var(--background);
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
 }
 
 .header-title {
   display: flex;
-  align-items: baseline;
-  gap: 0.75rem;
+  align-items: center;
+  gap: 0.625rem;
 }
 
 .header-title h1 {
-  font-size: 1.5rem;
+  font-size: 1.125rem;
   font-weight: 700;
   margin: 0;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.025em;
+  color: var(--foreground);
 }
 
 .count-badge {
-  font-size: 0.75rem;
-  background: var(--muted);
-  color: var(--muted-foreground);
-  padding: 0.125rem 0.5rem;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  background: color-mix(in srgb, var(--primary) 12%, transparent);
+  color: var(--primary);
+  border: 1px solid color-mix(in srgb, var(--primary) 25%, transparent);
+  padding: 0.15rem 0.55rem;
   border-radius: 999px;
-  font-weight: 500;
+  letter-spacing: 0.03em;
 }
 
+/* ─────────────────────────────────────────
+   内容区 & 网格
+───────────────────────────────────────── */
 .projects-content {
   flex: 1;
-  padding: 0 1rem 2rem;
+  padding: 1.25rem 1.25rem 3rem;
 }
 
 .project-grid {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
-  max-width: 800px;
+  gap: 0.75rem;
+  max-width: 680px;
   margin: 0 auto;
 }
 
-/* 卡片样式 */
+/* ─────────────────────────────────────────
+   项目卡片
+───────────────────────────────────────── */
 .project-card {
   display: flex;
   flex-direction: column;
-  border-radius: 1rem;
-  overflow: hidden;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  border-radius: 0.875rem;
   border: 1px solid var(--border);
   background: var(--card);
   cursor: pointer;
   position: relative;
+  overflow: hidden;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+}
+
+/* 左侧高亮条 — 悬停时展开 */
+.project-card::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: var(--primary);
+  border-radius: 0 2px 2px 0;
+  transform: scaleY(0);
+  transform-origin: center;
+  transition: transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.project-card:hover::before {
+  transform: scaleY(1);
 }
 
 .project-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 12px 24px -10px rgba(0,0,0,0.1);
-  border-color: var(--primary);
+  border-color: color-mix(in srgb, var(--primary) 40%, var(--border));
+  box-shadow: 0 4px 16px -4px color-mix(in srgb, var(--primary) 15%, transparent),
+              0 1px 4px -1px rgba(0, 0, 0, 0.06);
+  transform: translateY(-1px);
 }
 
+/* 草稿卡片 */
+.draft-card {
+  border-style: dashed;
+  background: color-mix(in srgb, var(--primary) 3%, var(--card));
+}
+
+.draft-card::before {
+  background: color-mix(in srgb, var(--muted-foreground) 70%, transparent);
+}
+
+/* ─────────────────────────────────────────
+   编辑按钮（悬停显现）
+───────────────────────────────────────── */
 .project-edit-trigger {
   position: absolute;
-  top: 0.875rem;
-  right: 0.875rem;
-  z-index: 1;
+  top: 0.75rem;
+  right: 0.75rem;
+  z-index: 2;
   display: inline-flex;
   align-items: center;
-  gap: 0.35rem;
+  gap: 0.3rem;
   border: 1px solid var(--border);
-  background: color-mix(in srgb, var(--background) 85%, transparent);
+  background: color-mix(in srgb, var(--card) 90%, transparent);
   color: var(--muted-foreground);
   border-radius: 999px;
-  padding: 0.35rem 0.7rem;
-  font-size: 0.75rem;
+  padding: 0.3rem 0.65rem;
+  font-size: 0.6875rem;
   font-weight: 600;
-  backdrop-filter: blur(10px);
+  letter-spacing: 0.02em;
+  backdrop-filter: blur(8px);
+  opacity: 0;
+  transition: opacity 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.project-card:hover .project-edit-trigger {
+  opacity: 1;
+}
+
+.project-edit-trigger:hover {
+  border-color: color-mix(in srgb, var(--primary) 50%, var(--border));
+  color: var(--primary);
 }
 
 .project-edit-trigger:disabled {
-  opacity: 0.5;
+  opacity: 0 !important;
 }
 
-.draft-card {
-  background: color-mix(in srgb, var(--primary) 5%, var(--card));
-  border-style: dashed;
-}
-
+/* ─────────────────────────────────────────
+   卡片主体
+───────────────────────────────────────── */
 .card-body {
-  padding: 1.25rem;
+  padding: 1.125rem 1.125rem 0.875rem 1.25rem;
   flex: 1;
   display: flex;
   align-items: center;
-  gap: 1.25rem;
+  gap: 1rem;
 }
 
 .card-header-row {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.45rem;
+  flex-shrink: 0;
 }
 
+/* ─────────────────────────────────────────
+   项目图标
+───────────────────────────────────────── */
 .project-icon-box {
   --project-icon-accent: var(--primary);
-  width: 3.5rem;
-  height: 3.5rem;
-  border-radius: 1rem;
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: 0.75rem;
   background: var(--project-icon-accent);
   color: var(--primary-foreground);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 1.5rem;
-  font-weight: 700;
-  box-shadow: 0 4px 12px color-mix(in srgb, var(--project-icon-accent) 20%, transparent);
+  font-size: 1.125rem;
+  font-weight: 800;
   flex-shrink: 0;
   overflow: hidden;
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--project-icon-accent) 30%, transparent);
+  transition: box-shadow 0.18s ease;
+}
+
+.project-card:hover .project-icon-box {
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--project-icon-accent) 40%, transparent);
 }
 
 .project-icon-box.draft {
-  background: var(--accent);
-  color: var(--accent-foreground);
+  background: color-mix(in srgb, var(--muted-foreground) 15%, var(--muted));
+  color: var(--muted-foreground);
+  box-shadow: none;
 }
 
 .project-icon-box.preview {
-  width: 4rem;
-  height: 4rem;
+  width: 3.25rem;
+  height: 3.25rem;
+  border-radius: 0.875rem;
 }
 
 .project-icon-image {
@@ -551,138 +618,164 @@ const editingPreviewIcon = computed(() => iconOverrideDraft.value || editingProj
   object-fit: cover;
 }
 
+/* ─────────────────────────────────────────
+   标签 & 状态
+───────────────────────────────────────── */
 .tag-row {
   display: flex;
-  gap: 0.5rem;
+  gap: 0.35rem;
 }
 
 .status-tag {
-  font-size: 0.625rem;
-  padding: 0.125rem 0.4rem;
-  border-radius: 4px;
-  font-weight: 600;
+  font-size: 0.5625rem;
+  padding: 0.15rem 0.4rem;
+  border-radius: 3px;
+  font-weight: 700;
   text-transform: uppercase;
+  letter-spacing: 0.07em;
   white-space: nowrap;
 }
 
 .status-tag.draft {
-  background: var(--accent);
-  color: var(--accent-foreground);
+  background: color-mix(in srgb, var(--muted-foreground) 12%, transparent);
+  color: var(--muted-foreground);
 }
 
+/* ─────────────────────────────────────────
+   项目信息文字
+───────────────────────────────────────── */
 .project-details {
   flex: 1;
   min-width: 0;
 }
 
 .project-title {
-  font-size: 1.125rem;
-  font-weight: 600;
-  margin: 0 0 0.375rem;
+  font-size: 0.9rem;
+  font-weight: 700;
+  margin: 0 0 0.25rem;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   color: var(--foreground);
+  letter-spacing: -0.015em;
 }
 
 .project-path {
-  font-size: 0.8125rem;
+  font-size: 0.6875rem;
   color: var(--muted-foreground);
   display: flex;
   align-items: center;
-  gap: 0.375rem;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-  word-break: break-all;
+  gap: 0.3rem;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.8;
 }
 
 .inline-icon {
-  width: 0.875rem;
-  height: 0.875rem;
+  width: 0.75rem;
+  height: 0.75rem;
   flex-shrink: 0;
 }
 
+/* ─────────────────────────────────────────
+   卡片底部
+───────────────────────────────────────── */
 .card-footer {
-  padding: 0.75rem 1.25rem;
-  border-top: 1px solid var(--border);
+  padding: 0.625rem 1.125rem 0.75rem 1.25rem;
+  border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: color-mix(in srgb, var(--muted) 15%, transparent);
+  gap: 0.75rem;
 }
 
 .meta-info {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
-  font-size: 0.75rem;
+  gap: 0.5rem;
+  font-size: 0.6875rem;
   color: var(--muted-foreground);
+  min-width: 0;
 }
 
 .meta-divider {
   opacity: 0.3;
+  flex-shrink: 0;
 }
 
 .meta-item {
   display: flex;
   align-items: center;
-  gap: 0.375rem;
+  gap: 0.275rem;
+  white-space: nowrap;
 }
 
 .action-btn {
   border-radius: 0.5rem;
   font-weight: 600;
-  width: auto;
-  min-width: 120px;
+  width: 100%;
 }
 
 .action-btn-mini {
-  border-radius: 0.625rem;
-  padding: 0 1rem;
-  height: 2.25rem;
-  font-size: 0.8125rem;
-  gap: 0.5rem;
+  border-radius: 0.5rem;
+  height: 1.875rem;
+  font-size: 0.71875rem;
+  padding: 0 0.75rem;
+  gap: 0.35rem;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
-/* 空状态 */
+/* ─────────────────────────────────────────
+   空状态
+───────────────────────────────────────── */
 .empty-hero {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 4rem 2rem;
+  padding: 5rem 2rem;
   text-align: center;
 }
 
 .hero-icon {
-  width: 5rem;
-  height: 5rem;
-  background: var(--muted);
-  border-radius: 1.5rem;
+  width: 4rem;
+  height: 4rem;
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--primary) 20%, transparent);
+  border-radius: 1.125rem;
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-bottom: 2rem;
-  color: var(--muted-foreground);
+  margin-bottom: 1.5rem;
+  color: var(--primary);
 }
 
 .empty-hero h2 {
-  font-size: 1.5rem;
+  font-size: 1.25rem;
   font-weight: 700;
-  margin: 0 0 1rem;
+  margin: 0 0 0.625rem;
+  letter-spacing: -0.025em;
 }
 
 .empty-hero p {
   color: var(--muted-foreground);
-  max-width: 20rem;
-  margin: 0 0 2rem;
-  line-height: 1.6;
+  max-width: 18rem;
+  margin: 0 0 1.75rem;
+  line-height: 1.65;
+  font-size: 0.875rem;
 }
 
 .hero-actions {
   display: flex;
-  gap: 1rem;
+  gap: 0.75rem;
 }
 
+/* ─────────────────────────────────────────
+   图标编辑器浮层
+───────────────────────────────────────── */
 .editor-overlay {
   position: fixed;
   inset: 0;
@@ -692,26 +785,28 @@ const editingPreviewIcon = computed(() => iconOverrideDraft.value || editingProj
   align-items: center;
   justify-content: center;
   overflow-y: auto;
-  background: color-mix(in srgb, black 38%, transparent);
+  background: color-mix(in srgb, black 42%, transparent);
+  backdrop-filter: blur(6px);
 }
 
 .editor-card {
-  width: min(100%, 32rem);
-  max-height: min(calc(100vh - 4rem), 44rem);
-  border-radius: 1.5rem;
+  width: min(100%, 30rem);
+  max-height: min(calc(100vh - 4rem), 42rem);
+  border-radius: 1.25rem;
   padding: 0;
   background: var(--card);
-  border: 1px solid var(--border);
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  box-shadow: 0 20px 60px -12px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(255,255,255,0.04);
 }
 
 .editor-body {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 1.25rem 1.25rem 0;
+  padding: 1.375rem 1.375rem 0;
   overscroll-behavior: contain;
 }
 
@@ -720,18 +815,20 @@ const editingPreviewIcon = computed(() => iconOverrideDraft.value || editingProj
   align-items: flex-start;
   justify-content: space-between;
   gap: 1rem;
+  margin-bottom: 1.25rem;
 }
 
 .editor-header h2 {
   margin: 0;
-  font-size: 1.2rem;
+  font-size: 1.0625rem;
   font-weight: 700;
+  letter-spacing: -0.02em;
 }
 
 .editor-header p {
-  margin: 0.35rem 0 0;
+  margin: 0.25rem 0 0;
   color: var(--muted-foreground);
-  font-size: 0.875rem;
+  font-size: 0.8125rem;
 }
 
 .editor-close {
@@ -742,10 +839,10 @@ const editingPreviewIcon = computed(() => iconOverrideDraft.value || editingProj
   display: flex;
   align-items: center;
   gap: 1rem;
-  margin-top: 1.25rem;
-  padding: 1rem;
-  border-radius: 1.25rem;
-  background: color-mix(in srgb, var(--muted) 40%, transparent);
+  padding: 0.875rem 1rem;
+  border-radius: 0.875rem;
+  background: color-mix(in srgb, var(--muted) 35%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
 }
 
 .editor-preview-copy {
@@ -754,13 +851,14 @@ const editingPreviewIcon = computed(() => iconOverrideDraft.value || editingProj
 
 .editor-preview-copy strong {
   display: block;
-  font-size: 0.95rem;
+  font-size: 0.875rem;
+  font-weight: 600;
 }
 
 .editor-preview-copy p {
-  margin: 0.35rem 0 0;
+  margin: 0.25rem 0 0;
   color: var(--muted-foreground);
-  font-size: 0.8125rem;
+  font-size: 0.78125rem;
   line-height: 1.5;
   word-break: break-word;
 }
@@ -772,24 +870,26 @@ const editingPreviewIcon = computed(() => iconOverrideDraft.value || editingProj
 .section-headline {
   display: flex;
   align-items: center;
-  gap: 0.45rem;
-  margin-bottom: 0.75rem;
-  font-size: 0.875rem;
+  gap: 0.4rem;
+  margin-bottom: 0.625rem;
+  font-size: 0.8125rem;
   font-weight: 600;
 }
 
-.editor-actions,
-.editor-footer {
+.editor-actions {
   display: flex;
-  gap: 0.75rem;
-  margin-top: 0.875rem;
+  gap: 0.625rem;
+  margin-top: 0.75rem;
 }
 
 .editor-footer {
   flex-shrink: 0;
-  padding: 1rem 1.25rem 1.25rem;
+  display: flex;
+  gap: 0.625rem;
+  padding: 1rem 1.375rem 1.375rem;
   background: var(--card);
-  border-top: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
+  border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  margin-top: 1.25rem;
 }
 
 .editor-action-btn {
@@ -799,33 +899,40 @@ const editingPreviewIcon = computed(() => iconOverrideDraft.value || editingProj
 .color-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0.75rem;
-  margin-top: 0.875rem;
+  gap: 0.625rem;
+  margin-top: 0.75rem;
 }
 
 .color-chip {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 0.45rem;
-  min-height: 2.75rem;
-  padding: 0.75rem;
-  border-radius: 1rem;
-  border: 1px solid color-mix(in srgb, var(--chip-color) 22%, var(--border));
-  background: color-mix(in srgb, var(--chip-color) 10%, var(--card));
+  gap: 0.4rem;
+  min-height: 2.5rem;
+  padding: 0.625rem;
+  border-radius: 0.75rem;
+  border: 1px solid color-mix(in srgb, var(--chip-color) 20%, var(--border));
+  background: color-mix(in srgb, var(--chip-color) 7%, var(--card));
   color: var(--foreground);
-  font-size: 0.8125rem;
+  font-size: 0.78125rem;
   font-weight: 600;
+  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+}
+
+.color-chip:hover {
+  border-color: color-mix(in srgb, var(--chip-color) 55%, var(--border));
+  background: color-mix(in srgb, var(--chip-color) 12%, var(--card));
 }
 
 .color-chip.active {
   border-color: var(--chip-color);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--chip-color) 18%, transparent);
+  background: color-mix(in srgb, var(--chip-color) 14%, var(--card));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--chip-color) 16%, transparent);
 }
 
 .color-dot {
-  width: 0.75rem;
-  height: 0.75rem;
+  width: 0.625rem;
+  height: 0.625rem;
   border-radius: 999px;
   background: var(--chip-color);
 }
@@ -833,12 +940,22 @@ const editingPreviewIcon = computed(() => iconOverrideDraft.value || editingProj
 .editor-error {
   margin: 1rem 0 0;
   color: var(--destructive);
-  font-size: 0.8125rem;
+  font-size: 0.78125rem;
+  padding: 0.625rem 0.875rem;
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, var(--destructive) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--destructive) 20%, transparent);
 }
 
-.fade-enter-active,
-.fade-leave-active {
+/* ─────────────────────────────────────────
+   过渡动画
+───────────────────────────────────────── */
+.fade-enter-active {
   transition: opacity 0.2s ease;
+}
+
+.fade-leave-active {
+  transition: opacity 0.15s ease;
 }
 
 .fade-enter-from,
@@ -846,34 +963,42 @@ const editingPreviewIcon = computed(() => iconOverrideDraft.value || editingProj
   opacity: 0;
 }
 
-@media (max-width: 640px) {
+/* ─────────────────────────────────────────
+   响应式：单列
+───────────────────────────────────────── */
+@media (max-width: 600px) {
+  .projects-header {
+    padding: 1.25rem 1.125rem 1rem;
+  }
+
+  .projects-content {
+    padding: 1rem 1rem 3rem;
+  }
+
+  /* 移动端编辑器从底部弹出 */
   .editor-overlay {
-    align-items: flex-start;
-    padding: max(0.75rem, env(safe-area-inset-top)) 0.75rem calc(5.75rem + env(safe-area-inset-bottom));
+    align-items: flex-end;
+    padding: 0;
   }
 
   .editor-card {
     width: 100%;
-    height: auto;
-    max-height: calc(100vh - 7.5rem - env(safe-area-inset-top) - env(safe-area-inset-bottom));
-    border-radius: 1.25rem;
+    max-height: calc(92vh - env(safe-area-inset-bottom));
+    border-radius: 1.25rem 1.25rem 0 0;
   }
 
   .editor-body {
-    padding: 1rem 1rem 0;
+    padding: 1.125rem 1.125rem 0;
   }
 
-  .card-footer,
-  .editor-actions,
-  .editor-footer,
-  .editor-preview-row {
+  .editor-footer {
+    padding: 0.875rem 1.125rem calc(0.875rem + env(safe-area-inset-bottom));
+  }
+
+  .card-footer {
     flex-direction: column;
     align-items: stretch;
-  }
-
-  .project-edit-trigger {
-    top: 0.75rem;
-    right: 0.75rem;
+    gap: 0.625rem;
   }
 
   .meta-info {
@@ -881,12 +1006,19 @@ const editingPreviewIcon = computed(() => iconOverrideDraft.value || editingProj
     flex-wrap: wrap;
   }
 
+  .editor-actions,
+  .editor-preview-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
   .color-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .editor-footer {
-    padding: 1rem 1rem calc(1rem + env(safe-area-inset-bottom));
+  /* 移动端编辑按钮始终可见 */
+  .project-edit-trigger {
+    opacity: 1;
   }
 }
 </style>

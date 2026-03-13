@@ -197,6 +197,13 @@ export function isRenderablePart(part: Part) {
   switch (part.type) {
     case 'text':
       return !part.ignored && Boolean(part.text.trim())
+    case 'step-start':
+    case 'step-finish':
+    case 'snapshot':
+    case 'patch':
+    case 'reasoning':
+    case 'tool':
+      return false
     default:
       return true
   }
@@ -232,7 +239,11 @@ export function hasActiveToolCall(messages: ChatMessageRecord[]) {
 }
 
 export function pruneEmptyAssistantMessages(messages: ChatMessageRecord[]) {
-  return messages.filter((message) => isRenderableMessage(message))
+  return messages.filter(
+    (message) =>
+      isRenderableMessage(message) ||
+      message.parts.some((p) => p.type === 'tool' || p.type === 'reasoning' || p.type === 'patch')
+  )
 }
 
 export function getToolStatus(status: 'pending' | 'running' | 'completed' | 'error'): ChatToolStatus {
