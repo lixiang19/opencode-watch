@@ -154,7 +154,6 @@ async function handleSend() {
           </Select>
         </div>
 
-        <span class="meta-shortcut">⌘↵</span>
       </div>
 
       <div v-if="selectedCommandDescription" class="composer-command-hint">

@@ -62,18 +62,30 @@ function getSessionInitial(title?: string, directory?: string | null) {
   return (title || directory || 'O').slice(0, 1).toUpperCase()
 }
 
+function normalizeDirectory(input?: string | null) {
+  if (!input) {
+    return ''
+  }
+
+  return input.replace(/\\/g, '/').replace(/\/+$/, '')
+}
+
+function resolveSessionProject(session: (typeof app.sessions)[number]) {
+  const projectId = session.projectId || session.project?.id || ''
+  const directory = normalizeDirectory(session.directory)
+
+  return (projectId ? projectLookup.value.byId.get(projectId) : undefined) ||
+    (directory ? projectLookup.value.byDirectory.get(directory) : undefined)
+}
+
 function getSessionProjectIcon(session: (typeof app.sessions)[number]) {
-  const project =
-    (session.project?.id ? projectLookup.value.byId.get(session.project.id) : undefined) ||
-    (session.directory ? projectLookup.value.byDirectory.get(session.directory) : undefined)
+  const project = resolveSessionProject(session)
 
   return project?.icon?.override || project?.icon?.url || session.project?.icon?.override || session.project?.icon?.url || ''
 }
 
 function getSessionProjectIconStyle(session: (typeof app.sessions)[number]) {
-  const project =
-    (session.project?.id ? projectLookup.value.byId.get(session.project.id) : undefined) ||
-    (session.directory ? projectLookup.value.byDirectory.get(session.directory) : undefined)
+  const project = resolveSessionProject(session)
   const accentKey = project?.icon?.color || session.project?.icon?.color || ''
   const accent = accentKey ? ICON_COLOR_VALUES[accentKey] : ''
   return accent ? { '--session-icon-accent': accent } : undefined

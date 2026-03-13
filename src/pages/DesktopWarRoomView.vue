@@ -17,6 +17,7 @@ const router = useRouter()
 const orderedSessions = computed(() => app.sessions)
 const openPanelIds = ref<string[]>([])
 const panelLoadingState = ref<Record<string, boolean>>({})
+const MIN_PANEL_PLACEHOLDER_MS = 220
 
 let restoreRouterPush: null | ((to: RouteLocationRaw) => Promise<unknown>) = null
 
@@ -56,26 +57,35 @@ async function openPanel(sessionId: string) {
   }
 
   app.clearSessionListBadges(sessionId)
+  const isNewPanel = !openPanelIds.value.includes(sessionId)
 
-  if (!openPanelIds.value.includes(sessionId)) {
+  if (isNewPanel) {
     openPanelIds.value = [...openPanelIds.value, sessionId]
   }
 
-  if (app.selectedSessionId === sessionId || app.sessionPreviewMessages[sessionId]?.length) {
-    panelLoadingState.value = {
-      ...panelLoadingState.value,
-      [sessionId]: false
-    }
+  if (!isNewPanel) {
     return
   }
 
+  const startedAt = Date.now()
   panelLoadingState.value = {
     ...panelLoadingState.value,
     [sessionId]: true
   }
 
   await nextTick()
-  void app.loadSessionPreview(sessionId, { limit: 40 }).finally(() => {
+
+  const loadPreview =
+    app.selectedSessionId === sessionId || app.sessionPreviewMessages[sessionId]?.length
+      ? Promise.resolve()
+      : app.loadSessionPreview(sessionId, { limit: 40 })
+
+  void loadPreview.finally(async () => {
+    const elapsed = Date.now() - startedAt
+    if (elapsed < MIN_PANEL_PLACEHOLDER_MS) {
+      await new Promise((resolve) => window.setTimeout(resolve, MIN_PANEL_PLACEHOLDER_MS - elapsed))
+    }
+
     panelLoadingState.value = {
       ...panelLoadingState.value,
       [sessionId]: false
@@ -185,16 +195,18 @@ watch(
   <div class="desktop-page">
     <div class="desktop-note">
       <Sparkles class="h-4 w-4" />
-      <span>左侧复用移动端列表，右侧聊天窗复用和手机端同一套聊天面板。</span>
+      <span>左侧把项目和会话收进同一个边栏，并改成更轻的分割线列表。</span>
     </div>
 
     <div class="desktop-shell">
-      <aside class="desktop-pane pane-projects">
-        <ProjectsView />
-      </aside>
+      <aside class="desktop-sidebar">
+        <section class="desktop-sidebar-section sidebar-projects">
+          <ProjectsView />
+        </section>
 
-      <aside class="desktop-pane pane-conversations">
-        <ConversationListView />
+        <section class="desktop-sidebar-section sidebar-conversations">
+          <ConversationListView />
+        </section>
       </aside>
 
       <main class="desktop-chat-stage">
@@ -271,7 +283,7 @@ watch(
           <div class="desktop-empty-card">
             <FolderSync class="h-5 w-5" />
             <strong>右侧还没有打开对话</strong>
-            <p>从中间对话列表点开，或在左侧项目里新建对话后，它才会出现在这里。</p>
+            <p>从左侧合并列表点开，或在项目里新建对话后，它才会出现在这里。</p>
           </div>
         </div>
       </main>
@@ -305,50 +317,108 @@ watch(
 
 .desktop-shell {
   display: grid;
-  grid-template-columns: 22rem 22rem minmax(0, 1fr);
-  gap: 1rem;
-  min-width: 1580px;
+  grid-template-columns: 25rem minmax(0, 1fr);
+  gap: 1.25rem;
+  min-width: 1360px;
   height: calc(100vh - 2rem);
 }
 
-.desktop-pane {
+.desktop-sidebar {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) minmax(0, 1.1fr);
   min-height: 0;
   overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--border) 84%, transparent);
-  border-radius: 1.5rem;
-  background: color-mix(in srgb, var(--card) 94%, transparent);
-  box-shadow: var(--shadow-xl);
-  backdrop-filter: blur(20px);
+  padding-right: 1rem;
+  border-right: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
 }
 
-.desktop-pane :deep(.projects-container),
-.desktop-pane :deep(.conversations-container) {
+.desktop-sidebar-section {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.desktop-sidebar-section + .desktop-sidebar-section {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+}
+
+.desktop-sidebar-section :deep(.projects-container),
+.desktop-sidebar-section :deep(.conversations-container) {
   min-height: 100%;
   height: 100%;
   background: transparent;
 }
 
-.desktop-pane :deep(.projects-header),
-.desktop-pane :deep(.conversations-header) {
-  background: color-mix(in srgb, var(--card) 94%, transparent);
+.desktop-sidebar-section :deep(.projects-header),
+.desktop-sidebar-section :deep(.conversations-header) {
+  padding: 0 0 0.85rem;
+  position: static;
+  background: transparent;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
 }
 
-.desktop-pane :deep(.projects-content),
-.desktop-pane :deep(.conversations-content) {
+.desktop-sidebar-section :deep(.projects-content),
+.desktop-sidebar-section :deep(.conversations-content) {
   min-height: 0;
   overflow-y: auto;
+  padding: 0;
 }
 
-.desktop-pane :deep(.project-grid) {
+.desktop-sidebar-section :deep(.project-grid) {
   max-width: none;
+  gap: 0;
 }
 
-.desktop-pane :deep(.empty-hero) {
+.desktop-sidebar-section :deep(.empty-hero) {
   min-height: calc(100% - 4.5rem);
+}
+
+.desktop-sidebar-section :deep(.project-card) {
+  border: none !important;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 58%, transparent) !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.desktop-sidebar-section :deep(.project-card:last-child) {
+  border-bottom: none !important;
+}
+
+.desktop-sidebar-section :deep(.project-card:hover) {
+  transform: none;
+  box-shadow: none !important;
+  border-color: color-mix(in srgb, var(--border) 58%, transparent) !important;
+}
+
+.desktop-sidebar-section :deep(.draft-card) {
+  border-style: solid !important;
+}
+
+.desktop-sidebar-section :deep(.card-body) {
+  padding: 1rem 0;
+}
+
+.desktop-sidebar-section :deep(.card-footer) {
+  padding: 0 0 1rem;
+  border-top: none;
+  background: transparent;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.desktop-sidebar-section :deep(.project-edit-trigger) {
+  top: 0.9rem;
+  right: 0;
 }
 
 .desktop-chat-stage {
   min-height: 0;
+}
+
+.desktop-chat-stage :deep(.chat-layout-embedded) {
+  height: 80vh;
 }
 
 .chat-grid {
@@ -373,7 +443,7 @@ watch(
 .chat-window-placeholder {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
-  min-height: 34rem;
+  height: 80vh;
   border: 1px solid var(--border);
   border-radius: 1.5rem;
   background: var(--card);

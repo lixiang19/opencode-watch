@@ -18,6 +18,7 @@ export interface SessionProjectMeta {
 
 export interface SessionRecord {
   id: string
+  projectId?: string
   title?: string
   directory?: string | null
   parentID?: string | null

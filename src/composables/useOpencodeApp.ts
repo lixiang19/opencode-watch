@@ -3,6 +3,7 @@ import {
   createOpencodeClient,
   type Command as OpencodeCommand,
   type Event as OpencodeEvent,
+  type GlobalSession,
   type Message,
   type Part,
   type PermissionRequest,
@@ -470,7 +471,21 @@ function applyEventToMessageCollection(messages: ChatMessageRecord[], event: Ope
 
 function getEventSessionId(event: OpencodeEvent) {
   const properties = event.properties as Record<string, any>
-  return properties.sessionID || properties.info?.sessionID || properties.part?.sessionID || ''
+  return properties.sessionID || properties.info?.sessionID || properties.info?.id || properties.part?.sessionID || ''
+}
+
+function shouldRefreshSessionList(event: OpencodeEvent) {
+  switch (event.type) {
+    case 'session.created':
+    case 'session.updated':
+    case 'session.deleted':
+    case 'session.idle':
+    case 'message.updated':
+    case 'message.removed':
+      return true
+    default:
+      return false
+  }
 }
 
 function isUnauthorizedError(error: unknown) {
@@ -527,6 +542,27 @@ function mapProjectCatalogEntry(project: Project): ProjectCatalogEntry {
           color: project.icon.color
         }
       : undefined
+  }
+}
+
+function mapGlobalSession(session: GlobalSession): SessionRecord {
+  return {
+    id: session.id,
+    projectId: session.projectID,
+    title: session.title,
+    directory: normalizeDirectory(session.directory),
+    parentID: session.parentID,
+    project: session.project
+      ? {
+          id: session.project.id,
+          name: session.project.name,
+          worktree: normalizeDirectory(session.project.worktree)
+        }
+      : null,
+    time: {
+      created: session.time.created,
+      updated: session.time.updated
+    }
   }
 }
 
@@ -645,7 +681,7 @@ export function useOpencodeApp() {
       const existing = groups.get(directory)
       const updated = session.time?.updated ?? session.time?.created ?? 0
       if (existing) {
-        existing.projectId = existing.projectId || session.project?.id
+        existing.projectId = existing.projectId || session.projectId || session.project?.id
         existing.icon = existing.icon || session.project?.icon
         existing.sessionCount += 1
         existing.lastUpdated = Math.max(existing.lastUpdated, updated)
@@ -654,7 +690,7 @@ export function useOpencodeApp() {
         }
       } else {
         groups.set(directory, {
-          projectId: session.project?.id,
+          projectId: session.projectId || session.project?.id,
           directory,
           name: session.project?.name || getDirectoryName(directory),
           icon: session.project?.icon,
@@ -1119,7 +1155,7 @@ export function useOpencodeApp() {
       throw new Error(`拉取全局会话失败：${response.status} ${response.statusText}`)
     }
 
-    return (await response.json()) as SessionRecord[]
+    return ((await response.json()) as GlobalSession[]).map((session) => mapGlobalSession(session))
   }
 
   function getClient() {
@@ -1540,9 +1576,7 @@ export function useOpencodeApp() {
 
     if (event.type === 'session.created') {
       scheduleSessionListRefresh({ newSessionId: eventSessionId })
-    }
-
-    if (event.type === 'session.updated') {
+    } else if (shouldRefreshSessionList(event)) {
       scheduleSessionListRefresh()
     }
 
