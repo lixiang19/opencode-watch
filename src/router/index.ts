@@ -7,13 +7,17 @@ import DesktopWarRoomView from '@/pages/DesktopWarRoomView.vue'
 import ProjectsView from '@/pages/ProjectsView.vue'
 import SettingsView from '@/pages/SettingsView.vue'
 
+function prefersDesktopWarRoom() {
+  return typeof window !== 'undefined' && window.matchMedia('(min-width: 1100px)').matches
+}
+
 export const router = createRouter({
   history: createWebHistory(),
   routes: [
     {
       path: '/',
       component: AppLayout,
-      redirect: { name: 'conversations' },
+      redirect: () => (prefersDesktopWarRoom() ? { name: 'desktop-war-room' } : { name: 'conversations' }),
       children: [
         {
           path: 'conversations',

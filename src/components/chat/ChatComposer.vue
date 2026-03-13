@@ -29,41 +29,87 @@ const DEFAULT_MODEL_VALUE = '__default_model__'
 const NO_COMMAND_VALUE = '__no_command__'
 const localText = ref('')
 
-const disabled = computed(() => !app.streamReady || app.isSending)
-const canChooseAgent = computed(() => app.availableAgents.length > 0)
-const canChooseModel = computed(() => app.availableModels.length > 0)
-const hasCommandOptions = computed(() => app.availableCommands.length > 0)
-const selectedAgentValue = computed(() => app.selectedAgentId || undefined)
-const selectedModelValue = computed(() => app.selectedModelKey || undefined)
-const selectedCommandValue = computed(() => app.selectedCommandName || undefined)
+const desktopSession = computed(() => (props.sessionId ? app.desktopSessions[props.sessionId] ?? null : null))
+const availableAgents = computed(() => (props.sessionId ? desktopSession.value?.availableAgents ?? [] : app.availableAgents))
+const availableModels = computed(() => (props.sessionId ? desktopSession.value?.availableModels ?? [] : app.availableModels))
+const availableCommands = computed(() => (props.sessionId ? desktopSession.value?.availableCommands ?? [] : app.availableCommands))
+const isSending = computed(() => (props.sessionId ? Boolean(desktopSession.value?.isSending) : app.isSending))
+
+const disabled = computed(() => {
+  if (props.sessionId) {
+    return !app.streamReady || Boolean(desktopSession.value?.isSending)
+  }
+
+  return !app.streamReady || app.isSending
+})
+const canChooseAgent = computed(() => availableAgents.value.length > 0)
+const canChooseModel = computed(() => availableModels.value.length > 0)
+const hasCommandOptions = computed(() => availableCommands.value.length > 0)
+const selectedAgentValue = computed(() => (props.sessionId ? desktopSession.value?.selectedAgentId || undefined : app.selectedAgentId || undefined))
+const selectedModelValue = computed(() => (props.sessionId ? desktopSession.value?.selectedModelKey || undefined : app.selectedModelKey || undefined))
+const selectedCommandValue = computed(() => (props.sessionId ? desktopSession.value?.selectedCommandName || undefined : app.selectedCommandName || undefined))
 const commandGroups = computed(() => {
   return [
     {
       label: '系统命令',
-      items: app.availableCommands.filter((command) => command.category === 'system')
+      items: availableCommands.value.filter((command) => command.category === 'system')
     },
     {
       label: '自定义命令',
-      items: app.availableCommands.filter((command) => command.category === 'custom')
+      items: availableCommands.value.filter((command) => command.category === 'custom')
     },
     {
       label: 'Skill',
-      items: app.availableCommands.filter((command) => command.category === 'skill')
+      items: availableCommands.value.filter((command) => command.category === 'skill')
     }
   ].filter((group) => group.items.length > 0)
 })
-const selectedCommandDescription = computed(() => app.selectedCommand?.description || '')
+const selectedCommandDescription = computed(() => {
+  if (props.sessionId) {
+    return availableCommands.value.find((command) => command.name === desktopSession.value?.selectedCommandName)?.description || ''
+  }
+
+  return app.selectedCommand?.description || ''
+})
 
 function handleAgentChange(value: unknown) {
-  app.selectAgent(value === DEFAULT_AGENT_VALUE ? '' : String(value ?? ''))
+  const nextValue = value === DEFAULT_AGENT_VALUE ? '' : String(value ?? '')
+
+  if (props.sessionId) {
+    app.selectDesktopAgent(props.sessionId, nextValue)
+    return
+  }
+
+  app.selectAgent(nextValue)
 }
 
 function handleModelChange(value: unknown) {
-  app.selectModel(value === DEFAULT_MODEL_VALUE ? '' : String(value ?? ''))
+  const nextValue = value === DEFAULT_MODEL_VALUE ? '' : String(value ?? '')
+
+  if (props.sessionId) {
+    app.selectDesktopModel(props.sessionId, nextValue)
+    return
+  }
+
+  app.selectModel(nextValue)
 }
 
 function handleCommandChange(value: unknown) {
-  app.selectCommand(value === NO_COMMAND_VALUE ? '' : String(value ?? ''))
+  const nextValue = value === NO_COMMAND_VALUE ? '' : String(value ?? '')
+
+  if (props.sessionId) {
+    const nextCommand = availableCommands.value.find((command) => command.name === nextValue) ?? null
+    if (nextCommand?.category === 'skill') {
+      localText.value = `务必使用skill：${nextCommand.name}。`
+      app.selectDesktopCommand(props.sessionId, '')
+      return
+    }
+
+    app.selectDesktopCommand(props.sessionId, nextValue)
+    return
+  }
+
+  app.selectCommand(nextValue)
 }
 
 const composerValue = computed(() => (props.sessionId ? localText.value : app.composerText))
@@ -80,12 +126,15 @@ function handleComposerInput(value: string) {
 async function handleSend() {
   if (props.sessionId) {
     const text = localText.value.trim()
-    if (!text) {
+    const hasSelectedCommand = Boolean(desktopSession.value?.selectedCommandName)
+    if (!text && !hasSelectedCommand) {
       return
     }
 
-    await app.sendPromptToSession(props.sessionId, text)
-    localText.value = ''
+    const sent = await app.sendDesktopMessage(props.sessionId, text)
+    if (sent) {
+      localText.value = ''
+    }
     return
   }
 
@@ -109,7 +158,7 @@ async function handleSend() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem :value="DEFAULT_AGENT_VALUE">默认 Agent</SelectItem>
-              <SelectItem v-for="agent in app.availableAgents" :key="agent.id" :value="agent.id">
+              <SelectItem v-for="agent in availableAgents" :key="agent.id" :value="agent.id">
                 {{ agent.id }}
               </SelectItem>
             </SelectContent>
@@ -127,7 +176,7 @@ async function handleSend() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem :value="DEFAULT_MODEL_VALUE">默认模型</SelectItem>
-              <SelectItem v-for="model in app.availableModels" :key="model.key" :value="model.key">
+              <SelectItem v-for="model in availableModels" :key="model.key" :value="model.key">
                 {{ model.providerId }}/{{ model.modelId }}
               </SelectItem>
             </SelectContent>
@@ -177,7 +226,7 @@ async function handleSend() {
           :disabled="disabled || !composerValue.trim()"
           @click="handleSend"
         >
-          <LoaderCircle v-if="app.isSending" class="h-4 w-4 animate-spin" />
+          <LoaderCircle v-if="isSending" class="h-4 w-4 animate-spin" />
           <SendHorizonal v-else class="h-4 w-4" />
         </button>
       </div>

@@ -10,6 +10,17 @@ import { formatRelativeTime } from '@/lib/format'
 import { useOpencodeStore } from '@/stores/opencode'
 import type { ProjectRecord } from '@/types/opencode'
 
+const props = withDefaults(
+  defineProps<{
+    desktopMode?: boolean
+  }>(),
+  {
+    desktopMode: false
+  }
+)
+const emit = defineEmits<{
+  (event: 'open-session', sessionId: string): void
+}>()
 const app = useOpencodeStore()
 const router = useRouter()
 
@@ -179,10 +190,17 @@ const draftProject = computed(() => {
 
 async function createForProject(directory: string) {
   app.draftDirectory = directory
-  await app.createSession(directory)
-  if (app.selectedSessionId) {
-    void router.push({ name: 'session', params: { sessionId: app.selectedSessionId } })
+  const sessionId = props.desktopMode ? await app.createDesktopSession(directory) : await app.createSession(directory)
+  if (!sessionId) {
+    return
   }
+
+  if (props.desktopMode) {
+    emit('open-session', sessionId)
+    return
+  }
+
+  void router.push({ name: 'session', params: { sessionId } })
 }
 
 function useProjectDirectory(directory: string) {

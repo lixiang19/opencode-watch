@@ -48,10 +48,7 @@ async function submitAuth() {
           />
         </label>
 
-        <p class="auth-gate-note">
-          <KeyRound class="h-4 w-4" />
-          当前版本不会预填认证信息，必须手动输入后才能继续。
-        </p>
+
 
         <Button class="auth-gate-submit" type="submit" :disabled="!canSubmit || app.isConnecting">
           <RefreshCw v-if="app.isConnecting" class="h-4 w-4 animate-spin" />

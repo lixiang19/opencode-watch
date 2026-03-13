@@ -9,6 +9,17 @@ import Card from '@/components/ui/card/Card.vue'
 import { formatRelativeTime } from '@/lib/format'
 import { useOpencodeStore } from '@/stores/opencode'
 
+const props = withDefaults(
+  defineProps<{
+    desktopMode?: boolean
+  }>(),
+  {
+    desktopMode: false
+  }
+)
+const emit = defineEmits<{
+  (event: 'open-session', sessionId: string): void
+}>()
 const app = useOpencodeStore()
 const router = useRouter()
 
@@ -55,6 +66,12 @@ function formatSessionDirectory(directory?: string | null) {
 
 function openConversation(sessionId: string) {
   app.clearSessionListBadges(sessionId)
+
+  if (props.desktopMode) {
+    emit('open-session', sessionId)
+    return
+  }
+
   void router.push({ name: 'session', params: { sessionId } })
 }
 

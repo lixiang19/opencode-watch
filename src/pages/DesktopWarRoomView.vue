@@ -1,7 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import type { RouteLocationRaw } from 'vue-router'
-import { useRouter } from 'vue-router'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { FolderSync, LoaderCircle, Sparkles, X } from 'lucide-vue-next'
 
 import Button from '@/components/ui/button/Button.vue'
@@ -12,14 +10,11 @@ import ProjectsView from '@/pages/ProjectsView.vue'
 import { useOpencodeStore } from '@/stores/opencode'
 
 const app = useOpencodeStore()
-const router = useRouter()
 
 const orderedSessions = computed(() => app.sessions)
 const openPanelIds = ref<string[]>([])
 const panelLoadingState = ref<Record<string, boolean>>({})
 const MIN_PANEL_PLACEHOLDER_MS = 220
-
-let restoreRouterPush: null | ((to: RouteLocationRaw) => Promise<unknown>) = null
 
 const openSessions = computed(() => {
   const sessionMap = new Map(orderedSessions.value.map((session) => [session.id, session] as const))
@@ -43,12 +38,12 @@ function formatSessionDirectory(directory?: string | null) {
   return `.../${segments.slice(-2).join('/')}`
 }
 
-function getWindowMessages(sessionId: string) {
-  if (app.selectedSessionId === sessionId) {
-    return app.visibleMessages
-  }
+function getDesktopSessionState(sessionId: string) {
+  return app.desktopSessions[sessionId] ?? null
+}
 
-  return app.sessionPreviewMessages[sessionId] || []
+function getWindowMessages(sessionId: string) {
+  return getDesktopSessionState(sessionId)?.messages || app.sessionPreviewMessages[sessionId] || []
 }
 
 async function openPanel(sessionId: string) {
@@ -58,12 +53,13 @@ async function openPanel(sessionId: string) {
 
   app.clearSessionListBadges(sessionId)
   const isNewPanel = !openPanelIds.value.includes(sessionId)
+  const hasUsableState = Boolean(getDesktopSessionState(sessionId) && !getDesktopSessionState(sessionId)?.lastError)
 
   if (isNewPanel) {
     openPanelIds.value = [...openPanelIds.value, sessionId]
   }
 
-  if (!isNewPanel) {
+  if (!isNewPanel && hasUsableState) {
     return
   }
 
@@ -75,12 +71,9 @@ async function openPanel(sessionId: string) {
 
   await nextTick()
 
-  const loadPreview =
-    app.selectedSessionId === sessionId || app.sessionPreviewMessages[sessionId]?.length
-      ? Promise.resolve()
-      : app.loadSessionPreview(sessionId, { limit: 40 })
+  const loadSession = app.openDesktopSession(sessionId)
 
-  void loadPreview.finally(async () => {
+  void loadSession.finally(async () => {
     const elapsed = Date.now() - startedAt
     if (elapsed < MIN_PANEL_PLACEHOLDER_MS) {
       await new Promise((resolve) => window.setTimeout(resolve, MIN_PANEL_PLACEHOLDER_MS - elapsed))
@@ -95,6 +88,7 @@ async function openPanel(sessionId: string) {
 
 function closePanel(sessionId: string) {
   openPanelIds.value = openPanelIds.value.filter((id) => id !== sessionId)
+  app.closeDesktopSession(sessionId)
   const nextState = { ...panelLoadingState.value }
   delete nextState[sessionId]
   panelLoadingState.value = nextState
@@ -105,65 +99,11 @@ async function loadOlderForPanel(sessionId: string) {
     return
   }
 
-  if (app.selectedSessionId !== sessionId) {
-    await app.openSession(sessionId)
-  }
-
-  await app.loadOlderMessages()
-}
-
-function getSessionIdFromRoute(to: RouteLocationRaw) {
-  if (typeof to === 'string') {
-    const match = to.match(/^\/conversations\/([^/?#]+)/)
-    return match ? decodeURIComponent(match[1]) : ''
-  }
-
-  if ('name' in to && to.name === 'session') {
-    const raw = to.params?.sessionId
-    return Array.isArray(raw) ? String(raw[0] || '') : String(raw || '')
-  }
-
-  if ('path' in to && typeof to.path === 'string') {
-    const match = to.path.match(/^\/conversations\/([^/?#]+)/)
-    return match ? decodeURIComponent(match[1]) : ''
-  }
-
-  return ''
-}
-
-function installDesktopRouterBridge() {
-  const originalPush = router.push.bind(router)
-  restoreRouterPush = (to: RouteLocationRaw) => originalPush(to)
-
-  router.push = ((to: RouteLocationRaw) => {
-    if (router.currentRoute.value.name === 'desktop-war-room') {
-      const sessionId = getSessionIdFromRoute(to)
-      if (sessionId) {
-        void openPanel(sessionId)
-        return Promise.resolve(router.currentRoute.value)
-      }
-    }
-
-    return originalPush(to)
-  }) as typeof router.push
-}
-
-function restoreDesktopRouterBridge() {
-  if (!restoreRouterPush) {
-    return
-  }
-
-  router.push = restoreRouterPush as typeof router.push
-  restoreRouterPush = null
+  await app.loadOlderDesktopMessages(sessionId)
 }
 
 onMounted(() => {
-  installDesktopRouterBridge()
   void app.preloadHomeData()
-})
-
-onBeforeUnmount(() => {
-  restoreDesktopRouterBridge()
 })
 
 watch(
@@ -182,7 +122,11 @@ watch(
   () => orderedSessions.value.map((session) => session.id).join(','),
   () => {
     const validIds = new Set(orderedSessions.value.map((session) => session.id))
+    const removedIds = openPanelIds.value.filter((sessionId) => !validIds.has(sessionId))
     openPanelIds.value = openPanelIds.value.filter((sessionId) => validIds.has(sessionId))
+    for (const sessionId of removedIds) {
+      app.closeDesktopSession(sessionId)
+    }
     panelLoadingState.value = Object.fromEntries(
       Object.entries(panelLoadingState.value).filter(([sessionId]) => validIds.has(sessionId))
     )
@@ -201,11 +145,11 @@ watch(
     <div class="desktop-shell">
       <aside class="desktop-sidebar">
         <section class="desktop-sidebar-section sidebar-projects">
-          <ProjectsView />
+          <ProjectsView desktop-mode @open-session="openPanel" />
         </section>
 
         <section class="desktop-sidebar-section sidebar-conversations">
-          <ConversationListView />
+          <ConversationListView desktop-mode @open-session="openPanel" />
         </section>
       </aside>
 
@@ -246,12 +190,12 @@ watch(
               :project-name="formatSessionDirectory(session.directory)"
               :messages="getWindowMessages(session.id)"
               :connected="app.streamReady"
-              :busy="app.selectedSessionId === session.id && (app.sessionStatus === 'busy' || app.isSending)"
-              :is-loading="app.selectedSessionId === session.id && app.isLoadingSession"
-              :last-error="app.selectedSessionId === session.id ? app.lastError : ''"
-              :has-truncated-messages="app.selectedSessionId === session.id && app.hasTruncatedMessages"
-              :history-limit="app.historyMessageLimit"
-              :show-working-indicator="app.selectedSessionId === session.id"
+              :busy="getDesktopSessionState(session.id)?.sessionStatus === 'busy' || getDesktopSessionState(session.id)?.isSending"
+              :is-loading="getDesktopSessionState(session.id)?.isLoadingSession"
+              :last-error="getDesktopSessionState(session.id)?.lastError || ''"
+              :has-truncated-messages="getDesktopSessionState(session.id)?.hasMoreHistory"
+              :history-limit="getDesktopSessionState(session.id)?.historyMessageLimit || 0"
+              :show-working-indicator="true"
               empty-text="暂无消息"
             >
               <template #trailing>
@@ -264,10 +208,10 @@ watch(
                 <Button
                   variant="outline"
                   size="sm"
-                  :disabled="app.isLoadingOlderMessages || app.selectedSessionId !== session.id"
+                  :disabled="getDesktopSessionState(session.id)?.isLoadingOlderMessages || !getDesktopSessionState(session.id)?.hasMoreHistory"
                   @click="loadOlderForPanel(session.id)"
                 >
-                  <LoaderCircle v-if="app.isLoadingOlderMessages && app.selectedSessionId === session.id" class="h-3.5 w-3.5 animate-spin" />
+                  <LoaderCircle v-if="getDesktopSessionState(session.id)?.isLoadingOlderMessages" class="h-3.5 w-3.5 animate-spin" />
                   <template v-else>加载更早</template>
                 </Button>
               </template>

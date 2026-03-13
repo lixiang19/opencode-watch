@@ -109,3 +109,21 @@ export interface ChatCommandRecord {
 }
 
 export type ComposerMode = 'prompt' | 'command'
+
+export interface DesktopSessionState {
+  sessionId: string
+  messages: ChatMessageRecord[]
+  availableAgents: ChatAgentRecord[]
+  availableCommands: ChatCommandRecord[]
+  availableModels: ChatModelRecord[]
+  selectedAgentId: string
+  selectedModelKey: string
+  selectedCommandName: string
+  isLoadingSession: boolean
+  isSending: boolean
+  isLoadingOlderMessages: boolean
+  sessionStatus: 'idle' | 'busy'
+  lastError: string
+  historyMessageLimit: number
+  hasMoreHistory: boolean
+}
