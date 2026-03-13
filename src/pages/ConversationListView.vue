@@ -257,6 +257,28 @@ watch(
 .conversations-content {
   flex: 1;
   padding: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--primary) 22%, transparent) transparent;
+  -webkit-overflow-scrolling: touch;
+}
+
+.conversations-content::-webkit-scrollbar {
+  -webkit-appearance: none;
+  width: 2px !important;
+}
+
+.conversations-content::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.conversations-content::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--primary) 22%, transparent);
+  border-radius: 9999px;
+}
+
+.conversations-content::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--primary) 34%, transparent);
 }
 
 .sessions-list {

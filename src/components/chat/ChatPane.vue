@@ -157,27 +157,31 @@ watch(showAgentWorking, (value, previousValue) => {
       </div>
     </div>
 
-    <details v-if="activityItems.length" class="chat-activity-panel">
-      <summary class="activity-summary">活动 · {{ activityItems.length }} 项</summary>
-      <ul class="activity-list soft-scrollbar">
-        <li v-for="item in activityItems" :key="item.id" class="activity-item">
-          <span class="activity-tag" :class="item.type === 'reasoning' ? 'activity-tag-reasoning' : 'activity-tag-tool'">
-            {{ item.type === 'reasoning' ? '思考' : '工具' }}
-          </span>
-          <span class="activity-name">{{ item.type === 'tool' ? item.tool : '思考过程' }}</span>
-          <span v-if="item.type === 'tool'" class="activity-status" :class="`activity-status-${item.state.status}`">
-            {{ toolStatusLabel(item.state.status) }}
-          </span>
-        </li>
-      </ul>
-    </details>
+    <div v-if="activityItems.length || patchFiles.length" class="chat-meta-bar">
+      <details v-if="activityItems.length" class="meta-disc">
+        <summary class="meta-disc-trigger">活动 · {{ activityItems.length }}</summary>
+        <ul class="meta-disc-list soft-scrollbar">
+          <li v-for="item in activityItems" :key="item.id" class="activity-item">
+            <span class="activity-tag" :class="item.type === 'reasoning' ? 'activity-tag-reasoning' : 'activity-tag-tool'">
+              {{ item.type === 'reasoning' ? '思考' : '工具' }}
+            </span>
+            <span class="activity-name">{{ item.type === 'tool' ? item.tool : '思考过程' }}</span>
+            <span v-if="item.type === 'tool'" class="activity-status" :class="`activity-status-${item.state.status}`">
+              {{ toolStatusLabel(item.state.status) }}
+            </span>
+          </li>
+        </ul>
+      </details>
 
-    <details v-if="patchFiles.length" class="chat-patches-panel">
-      <summary class="patches-summary">补丁 · {{ patchFiles.length }} 个文件</summary>
-      <ul class="patch-files soft-scrollbar">
-        <li v-for="file in patchFiles" :key="file">{{ file }}</li>
-      </ul>
-    </details>
+      <span v-if="activityItems.length && patchFiles.length" class="meta-sep" />
+
+      <details v-if="patchFiles.length" class="meta-disc">
+        <summary class="meta-disc-trigger">补丁 · {{ patchFiles.length }}</summary>
+        <ul class="meta-disc-list soft-scrollbar">
+          <li v-for="file in patchFiles" :key="file" class="patch-file-item">{{ file }}</li>
+        </ul>
+      </details>
+    </div>
 
     <div class="chat-composer-slot">
       <slot name="composer" />
@@ -188,7 +192,7 @@ watch(showAgentWorking, (value, previousValue) => {
 <style scoped>
 .chat-layout {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto auto auto;
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
   height: calc(100dvh - var(--tabbar-height, 0px));
   min-height: 0;
   background: var(--background);
@@ -302,6 +306,27 @@ watch(showAgentWorking, (value, previousValue) => {
   overscroll-behavior: contain;
   padding: 1.25rem 1.125rem 0.5rem;
   scroll-padding-bottom: 1rem;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--primary) 22%, transparent) transparent;
+  -webkit-overflow-scrolling: touch;
+}
+
+.chat-stream::-webkit-scrollbar {
+  -webkit-appearance: none;
+  width: 2px !important;
+}
+
+.chat-stream::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.chat-stream::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--primary) 22%, transparent);
+  border-radius: 9999px;
+}
+
+.chat-stream::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--primary) 34%, transparent);
 }
 
 .chat-alert {
@@ -393,54 +418,86 @@ watch(showAgentWorking, (value, previousValue) => {
   min-height: 0;
 }
 
-.chat-activity-panel {
+/* ── Meta bar (activity + patches) ── */
+.chat-meta-bar {
+  display: flex;
+  align-items: flex-start;
+  gap: 0;
   border-top: 1px solid var(--border);
   background: var(--card);
 }
 
-.activity-summary {
+.meta-sep {
+  width: 1px;
+  align-self: stretch;
+  background: var(--border);
+}
+
+.meta-disc {
+  flex: 1;
+  min-width: 0;
+}
+
+.meta-disc-trigger {
   display: flex;
   align-items: center;
-  gap: 0.375rem;
-  padding: 0.5rem 1.125rem;
+  padding: 0.4rem 1rem;
   cursor: pointer;
   color: var(--muted-foreground);
-  font-size: 0.78rem;
+  font-size: 0.75rem;
   font-weight: 500;
   user-select: none;
   list-style: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.activity-summary:hover {
+.meta-disc-trigger:hover {
   color: var(--foreground);
-  background: color-mix(in srgb, var(--muted) 40%, transparent);
 }
 
-.activity-list {
+.meta-disc-list {
   margin: 0;
-  padding: 0.25rem 1.125rem 0.625rem;
-  max-height: 12rem;
+  padding: 0.25rem 1rem 0.5rem;
+  max-height: 10rem;
   overflow-y: auto;
   display: grid;
-  gap: 0.2rem;
+  gap: 0.15rem;
   list-style: none;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--primary) 18%, transparent) transparent;
+}
+
+.meta-disc-list::-webkit-scrollbar {
+  -webkit-appearance: none;
+  width: 2px !important;
+}
+
+.meta-disc-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.meta-disc-list::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--primary) 18%, transparent);
+  border-radius: 9999px;
 }
 
 .activity-item {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.2rem 0;
+  padding: 0.15rem 0;
 }
 
 .activity-tag {
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;
-  height: 1.25rem;
-  padding: 0 0.4rem;
+  height: 1.125rem;
+  padding: 0 0.35rem;
   border-radius: 999px;
-  font-size: 0.68rem;
+  font-size: 0.65rem;
   font-weight: 600;
 }
 
@@ -458,7 +515,7 @@ watch(showAgentWorking, (value, previousValue) => {
   flex: 1;
   overflow: hidden;
   color: var(--foreground);
-  font-size: 0.78rem;
+  font-size: 0.75rem;
   font-family: monospace;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -466,7 +523,7 @@ watch(showAgentWorking, (value, previousValue) => {
 
 .activity-status {
   flex-shrink: 0;
-  font-size: 0.72rem;
+  font-size: 0.7rem;
   color: var(--muted-foreground);
 }
 
@@ -478,43 +535,9 @@ watch(showAgentWorking, (value, previousValue) => {
   color: var(--destructive);
 }
 
-.chat-patches-panel {
-  border-top: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
-  background: var(--card);
-}
-
-.patches-summary {
-  display: flex;
-  align-items: center;
-  gap: 0.375rem;
-  padding: 0.5rem 1.125rem;
-  cursor: pointer;
+.patch-file-item {
   color: var(--muted-foreground);
-  font-size: 0.78rem;
-  font-weight: 500;
-  user-select: none;
-  list-style: none;
-}
-
-.patches-summary:hover {
-  color: var(--foreground);
-  background: color-mix(in srgb, var(--muted) 40%, transparent);
-}
-
-.patch-files {
-  margin: 0;
-  padding: 0.375rem 1.125rem 0.625rem 1.5rem;
-  max-height: 10rem;
-  overflow-y: auto;
-  display: grid;
-  gap: 0.2rem;
-  list-style: none;
-}
-
-.patch-files li {
-  color: var(--muted-foreground);
-  font-size: 0.75rem;
+  font-size: 0.73rem;
   font-family: monospace;
   word-break: break-all;
 }

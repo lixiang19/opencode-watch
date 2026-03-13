@@ -336,6 +336,10 @@ watch(
   box-shadow: none !important;
 }
 
+.desktop-sidebar-section :deep(.project-card::before) {
+  content: none !important;
+}
+
 .desktop-sidebar-section :deep(.project-card:last-child) {
   border-bottom: none !important;
 }
@@ -368,11 +372,12 @@ watch(
 }
 
 .desktop-chat-stage {
+  height: 100%;
   min-height: 0;
 }
 
 .desktop-chat-stage :deep(.chat-layout-embedded) {
-  height: 80vh;
+  height: 100%;
 }
 
 .chat-grid {
@@ -397,7 +402,7 @@ watch(
 .chat-window-placeholder {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
-  height: 80vh;
+  height: 100%;
   border: 1px solid var(--border);
   border-radius: 1.5rem;
   background: var(--card);

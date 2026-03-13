@@ -306,6 +306,28 @@ const installStatusText = computed(() => {
 .settings-content {
   flex: 1;
   padding: 0 1rem 3rem;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--primary) 22%, transparent) transparent;
+  -webkit-overflow-scrolling: touch;
+}
+
+.settings-content::-webkit-scrollbar {
+  -webkit-appearance: none;
+  width: 2px !important;
+}
+
+.settings-content::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.settings-content::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--primary) 22%, transparent);
+  border-radius: 9999px;
+}
+
+.settings-content::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--primary) 34%, transparent);
 }
 
 .settings-stack {

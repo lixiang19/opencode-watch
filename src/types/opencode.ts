@@ -41,7 +41,7 @@ export interface ProjectRecord {
 
 export interface ChatMessageRecord {
   id: string
-  role: Message['role']
+  role?: Message['role']
   parts: Part[]
   updatedAt?: number
   error?: string

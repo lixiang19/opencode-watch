@@ -69,6 +69,28 @@ const activeTab = computed(() => {
   width: 100%;
   min-height: calc(100vh - var(--tabbar-height));
   padding-bottom: var(--tabbar-height);
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--primary) 18%, transparent) transparent;
+  -webkit-overflow-scrolling: touch;
+}
+
+.shell-content::-webkit-scrollbar {
+  -webkit-appearance: none;
+  width: 2px !important;
+}
+
+.shell-content::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.shell-content::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--primary) 18%, transparent);
+  border-radius: 9999px;
+}
+
+.shell-content::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--primary) 30%, transparent);
 }
 
 .tabbar {

@@ -460,6 +460,28 @@ const editingPreviewIcon = computed(() => iconOverrideDraft.value || editingProj
 .projects-content {
   flex: 1;
   padding: 1.25rem 1.25rem 3rem;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--primary) 22%, transparent) transparent;
+  -webkit-overflow-scrolling: touch;
+}
+
+.projects-content::-webkit-scrollbar {
+  -webkit-appearance: none;
+  width: 2px;
+}
+
+.projects-content::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.projects-content::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--primary) 22%, transparent);
+  border-radius: 9999px;
+}
+
+.projects-content::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--primary) 34%, transparent);
 }
 
 .project-grid {

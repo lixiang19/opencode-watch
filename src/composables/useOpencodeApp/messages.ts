@@ -163,7 +163,7 @@ export function ensureChatMessage(messages: ChatMessageRecord[], info: Partial<M
   if (!current) {
     current = {
       id: info.id,
-      role: info.role === 'user' ? 'user' : 'assistant',
+      role: info.role === 'user' || info.role === 'assistant' ? info.role : undefined,
       parts: [],
       updatedAt: Date.now()
     }
@@ -229,7 +229,15 @@ export function getMessagePreviewText(message: ChatMessageRecord) {
 }
 
 export function isRenderableMessage(message: ChatMessageRecord) {
-  return Boolean(message.role === 'user' || message.parts.some((part) => isRenderablePart(part)) || message.confirmation || message.question || message.error)
+  if (message.role === 'user') {
+    return true
+  }
+
+  if (message.role !== 'assistant') {
+    return false
+  }
+
+  return Boolean(message.parts.some((part) => isRenderablePart(part)) || message.confirmation || message.question || message.error)
 }
 
 export function hasActiveToolCall(messages: ChatMessageRecord[]) {

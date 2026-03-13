@@ -258,15 +258,15 @@ onMounted(() => {
           ref="textareaEl"
           :value="composerValue"
           :disabled="disabled"
-          :placeholder="hasSelectedCommand ? '可直接发送命令，或补充说明…' : '输入消息，Enter 发送，Shift+Enter 换行'"
+          :placeholder="hasSelectedCommand ? '可直接发送命令，或补充说明…' : ''"
           class="composer-input soft-scrollbar"
           rows="1"
           @input="handleComposerInput(($event.target as HTMLTextAreaElement).value)"
           @keydown="handleComposerKeydown"
         />
         <div class="composer-input-hint">
-          <span>{{ hasSelectedCommand ? '已选命令，可空内容发送' : 'Enter 发送' }}</span>
-          <span>Shift + Enter 换行</span>
+          <span>{{ hasSelectedCommand ? '已选命令，可空内容发送' : '' }}</span>
+        
         </div>
         </div>
         <button
@@ -296,9 +296,8 @@ onMounted(() => {
 
 .composer-card {
   border: 1px solid var(--border);
-  border-radius: 1.5rem;
+  border-radius: 1rem;
   background: var(--card);
-  box-shadow: var(--shadow-lg, 0 4px 24px rgba(0,0,0,.08));
   overflow: hidden;
 }
 
@@ -308,7 +307,7 @@ onMounted(() => {
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
-  padding: 0.625rem 0.75rem 0;
+  padding: 0.5rem 0.75rem 0;
 }
 
 .composer-selects {
@@ -324,7 +323,8 @@ onMounted(() => {
   flex: 1;
   min-width: 0;
   max-width: 11rem;
-  font-size: 0.8125rem;
+  height: 1.875rem;
+  font-size: 0.78rem;
 }
 
 .composer-select-model {
@@ -338,13 +338,13 @@ onMounted(() => {
 .composer-select-empty {
   display: inline-flex;
   align-items: center;
-  height: 2.25rem;
-  padding: 0 0.75rem;
+  height: 1.875rem;
+  padding: 0 0.625rem;
   border: 1px solid var(--input);
-  border-radius: 0.75rem;
+  border-radius: 0.5rem;
   background: var(--background);
   color: var(--muted-foreground);
-  font-size: 0.8125rem;
+  font-size: 0.78rem;
   white-space: nowrap;
 }
 
@@ -425,32 +425,28 @@ onMounted(() => {
 .btn-send {
   flex-shrink: 0;
   display: grid;
-   width: 2.75rem;
-   height: 2.75rem;
-   place-items: center;
-   border: 0;
-   border-radius: 0.95rem;
-   background: var(--primary);
-   color: var(--primary-foreground);
-   box-shadow: 0 10px 22px color-mix(in srgb, var(--primary) 18%, transparent);
-   transition: opacity 0.15s, transform 0.1s, box-shadow 0.15s;
-   cursor: pointer;
+  width: 2.25rem;
+  height: 2.25rem;
+  place-items: center;
+  border: 0;
+  border-radius: 0.625rem;
+  background: var(--primary);
+  color: var(--primary-foreground);
+  transition: opacity 0.15s;
+  cursor: pointer;
 }
 
 .btn-send:hover:not(:disabled) {
-   opacity: 0.88;
-   transform: scale(1.04);
-   box-shadow: 0 12px 28px color-mix(in srgb, var(--primary) 24%, transparent);
+  opacity: 0.82;
 }
 
 .btn-send:active:not(:disabled) {
-  transform: scale(0.96);
+  opacity: 0.7;
 }
 
 .btn-send:disabled {
-   opacity: 0.42;
-   box-shadow: none;
-   cursor: default;
+  opacity: 0.35;
+  cursor: default;
 }
 
 @media (max-width: 640px) {
