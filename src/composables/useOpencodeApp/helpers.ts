@@ -16,6 +16,20 @@ export function getDirectoryName(directory: string) {
   return parts[parts.length - 1] ?? normalized
 }
 
+export function formatPathTail(input?: string | null, depth = 4) {
+  const normalized = normalizeDirectory(input)
+  if (!normalized) {
+    return ''
+  }
+
+  const parts = normalized.split('/').filter(Boolean)
+  if (parts.length <= depth) {
+    return normalized.startsWith('/') ? `/${parts.join('/')}` : parts.join('/')
+  }
+
+  return `.../${parts.slice(-depth).join('/')}`
+}
+
 export function makeModelKey(providerId: string, modelId: string) {
   return `${providerId}/${modelId}`
 }

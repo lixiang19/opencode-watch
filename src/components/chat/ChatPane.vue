@@ -4,6 +4,7 @@ import { LoaderCircle } from 'lucide-vue-next'
 
 import Badge from '@/components/ui/badge/Badge.vue'
 import MessageBubble from '@/components/chat/MessageBubble.vue'
+import { formatPathTail } from '@/composables/useOpencodeApp/helpers'
 import { isRenderableMessage } from '@/composables/useOpencodeApp/messages'
 import type { Part } from '@opencode-ai/sdk/v2/client'
 import type { ChatMessageRecord, SessionWorkingInfo } from '@/types/opencode'
@@ -45,7 +46,12 @@ const patchParts = computed(() =>
     msg.parts.filter((p): p is Extract<Part, { type: 'patch' }> => p.type === 'patch')
   )
 )
-const patchFiles = computed(() => [...new Set(patchParts.value.flatMap((p) => p.files))])
+const patchFiles = computed(() => {
+  return [...new Set(patchParts.value.flatMap((p) => p.files))].map((file) => ({
+    fullPath: file,
+    displayPath: formatPathTail(file, 4)
+  }))
+})
 
 type ActivityItem = Extract<Part, { type: 'tool' }> | Extract<Part, { type: 'reasoning' }>
 const activityItems = computed(() =>
@@ -247,7 +253,7 @@ watch(showAgentWorking, (value, previousValue) => {
         <details v-if="patchFiles.length" class="meta-disc">
           <summary class="meta-disc-trigger">补丁 · {{ patchFiles.length }}</summary>
           <ul class="meta-disc-list soft-scrollbar">
-            <li v-for="file in patchFiles" :key="file" class="patch-file-item">{{ file }}</li>
+            <li v-for="file in patchFiles" :key="file.fullPath" class="patch-file-item">{{ file.displayPath }}</li>
           </ul>
         </details>
       </div>

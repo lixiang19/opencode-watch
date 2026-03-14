@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
-import { ImagePlus, SendHorizonal, Square, X } from 'lucide-vue-next'
+import { ImagePlus, SendHorizonal, SlidersHorizontal, Square, X } from 'lucide-vue-next'
 
 import {
   Select,
@@ -33,6 +33,7 @@ const imageInputEl = ref<HTMLInputElement | null>(null)
 const textareaEl = ref<HTMLTextAreaElement | null>(null)
 const attachedImages = ref<ComposerImageAttachment[]>([])
 const imageError = ref('')
+const showAdvancedControls = ref(false)
 
 const desktopSession = computed(() => (props.sessionId ? app.desktopSessions[props.sessionId] ?? null : null))
 const availableAgents = computed(() => (props.sessionId ? desktopSession.value?.availableAgents ?? [] : app.availableAgents))
@@ -85,22 +86,19 @@ const selectedCommandDescription = computed(() => {
 })
 const hasSelectedCommand = computed(() => Boolean(selectedCommandValue.value))
 const hasAttachedImages = computed(() => attachedImages.value.length > 0)
+const hasAdvancedSelections = computed(() => {
+  return Boolean(
+    selectedAgentValue.value ||
+      selectedModelValue.value ||
+      selectedVariantValue.value ||
+      selectedCommandValue.value
+  )
+})
 const canAttachImages = computed(() => !disabled.value && !hasSelectedCommand.value)
 const canSend = computed(() => {
   return !disabled.value && (Boolean(composerValue.value.trim()) || hasSelectedCommand.value || hasAttachedImages.value)
 })
 const canStop = computed(() => isSending.value)
-const composerHintText = computed(() => {
-  if (hasSelectedCommand.value) {
-    return '已选命令，可空内容发送'
-  }
-
-  if (!hasAttachedImages.value) {
-    return ''
-  }
-
-  return attachedImages.value.length === 1 ? '已附 1 张图片' : `已附 ${attachedImages.value.length} 张图片`
-})
 const latestUsage = computed(() => {
   const model = selectedModelDetail.value
   if (!model) {
@@ -134,6 +132,9 @@ const contextUsageText = computed(() => {
 
   const used = (latestUsage.value?.input ?? 0) + (latestUsage.value?.output ?? 0)
   return `上下文 ${formatTokenCount(used)} / ${formatTokenCount(limit)}`
+})
+const shouldShowStatusRow = computed(() => {
+  return hasSelectedCommand.value || hasAttachedImages.value || (showAdvancedControls.value && Boolean(contextUsageText.value))
 })
 
 function formatTokenCount(value: number) {
@@ -213,6 +214,10 @@ function openImagePicker() {
   }
 
   imageInputEl.value?.click()
+}
+
+function toggleAdvancedControls() {
+  showAdvancedControls.value = !showAdvancedControls.value
 }
 
 async function handleImageChange(event: Event) {
@@ -380,6 +385,7 @@ watch(composerValue, () => {
 
 watch(() => props.sessionId, () => {
   clearImages()
+  showAdvancedControls.value = false
   nextTick(syncTextareaHeight)
 })
 
@@ -391,52 +397,6 @@ onMounted(() => {
 <template>
   <footer class="composer" :class="{ 'composer-embedded': embedded }">
     <div class="composer-card">
-      <div class="composer-meta composer-meta-top">
-        <div class="composer-selects composer-selects-top">
-          <Select
-            v-if="canChooseAgent"
-            :model-value="selectedAgentValue"
-            :disabled="disabled"
-            @update:model-value="handleAgentChange"
-          >
-            <SelectTrigger class="composer-select">
-              <SelectValue placeholder="默认 Agent" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem :value="DEFAULT_AGENT_VALUE">默认 Agent</SelectItem>
-              <SelectItem v-for="agent in availableAgents" :key="agent.id" :value="agent.id">
-                {{ agent.id }}
-              </SelectItem>
-            </SelectContent>
-          </Select>
-          <span v-else class="composer-select-empty">默认 Agent</span>
-
-          <Select
-            :model-value="selectedCommandValue"
-            :disabled="disabled || !hasCommandOptions"
-            @update:model-value="handleCommandChange"
-          >
-            <SelectTrigger class="composer-select composer-select-cmd">
-              <SelectValue placeholder="/ 命令" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem :value="NO_COMMAND_VALUE">普通消息</SelectItem>
-              <SelectGroup v-for="group in commandGroups" :key="group.label">
-                <SelectLabel>{{ group.label }}</SelectLabel>
-                <SelectItem v-for="command in group.items" :key="command.name" :value="command.name">
-                  /{{ command.name }}
-                </SelectItem>
-              </SelectGroup>
-            </SelectContent>
-          </Select>
-        </div>
-
-      </div>
-
-      <div v-if="selectedCommandDescription" class="composer-command-hint">
-        {{ selectedCommandDescription }}
-      </div>
-
       <div v-if="attachedImages.length || imageError" class="composer-attachments">
         <div v-if="attachedImages.length" class="composer-attachment-list">
           <div v-for="image in attachedImages" :key="image.id" class="composer-attachment-chip">
@@ -470,7 +430,7 @@ onMounted(() => {
         />
         <button
           type="button"
-          class="btn-attach"
+          class="btn-tool btn-attach"
           :disabled="!canAttachImages"
           aria-label="添加图片"
           @click="openImagePicker"
@@ -478,21 +438,47 @@ onMounted(() => {
           <ImagePlus class="h-4 w-4" />
         </button>
         <div class="composer-input-shell" :class="{ 'composer-input-shell-active': canSend }">
-        <textarea
-          ref="textareaEl"
-          :value="composerValue"
-          :disabled="disabled"
-          :placeholder="hasSelectedCommand ? '可直接发送命令，或补充说明…' : ''"
-          class="composer-input soft-scrollbar"
-          rows="1"
-          @input="handleComposerInput(($event.target as HTMLTextAreaElement).value)"
-          @keydown="handleComposerKeydown"
-        />
-        <div class="composer-input-hint">
-          <span>{{ composerHintText }}</span>
-          <span v-if="contextUsageText" class="composer-context-hint">{{ contextUsageText }}</span>
+          <div v-if="shouldShowStatusRow" class="composer-status-row">
+            <div class="composer-status-chips">
+              <span v-if="hasSelectedCommand" class="composer-chip composer-chip-command">
+                <span>/{{ selectedCommandValue }}</span>
+                <button
+                  type="button"
+                  class="composer-chip-clear"
+                  :disabled="disabled"
+                  aria-label="清除命令"
+                  @click="clearSelectedCommand"
+                >
+                  <X class="h-3 w-3" />
+                </button>
+              </span>
+              <span v-if="hasAttachedImages" class="composer-chip">
+                {{ attachedImages.length === 1 ? '1 张图片' : `${attachedImages.length} 张图片` }}
+              </span>
+            </div>
+            <span v-if="contextUsageText && showAdvancedControls" class="composer-context-hint">{{ contextUsageText }}</span>
+          </div>
+          <textarea
+            ref="textareaEl"
+            :value="composerValue"
+            :disabled="disabled"
+            :placeholder="hasSelectedCommand ? '可直接发送命令，或补充说明…' : '发消息，Enter 发送，Shift + Enter 换行'"
+            class="composer-input soft-scrollbar"
+            rows="1"
+            @input="handleComposerInput(($event.target as HTMLTextAreaElement).value)"
+            @keydown="handleComposerKeydown"
+          />
         </div>
-        </div>
+        <button
+          type="button"
+          class="btn-tool btn-settings"
+          :class="{ 'btn-settings-active': showAdvancedControls }"
+          :aria-label="showAdvancedControls ? '收起高级设置' : '展开高级设置'"
+          @click="toggleAdvancedControls"
+        >
+          <SlidersHorizontal class="h-4 w-4" />
+          <span v-if="hasAdvancedSelections" class="btn-settings-dot" />
+        </button>
         <button
           type="button"
           class="btn-send"
@@ -506,8 +492,45 @@ onMounted(() => {
         </button>
       </div>
 
-      <div class="composer-meta composer-meta-bottom">
-        <div class="composer-selects composer-selects-bottom">
+      <div v-if="showAdvancedControls" class="composer-advanced">
+        <div class="composer-selects composer-selects-compact">
+          <Select
+            v-if="canChooseAgent"
+            :model-value="selectedAgentValue"
+            :disabled="disabled"
+            @update:model-value="handleAgentChange"
+          >
+            <SelectTrigger class="composer-select composer-select-agent">
+              <SelectValue placeholder="默认 Agent" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem :value="DEFAULT_AGENT_VALUE">默认 Agent</SelectItem>
+              <SelectItem v-for="agent in availableAgents" :key="agent.id" :value="agent.id">
+                {{ agent.id }}
+              </SelectItem>
+            </SelectContent>
+          </Select>
+          <span v-else class="composer-select-empty">默认 Agent</span>
+
+          <Select
+            :model-value="selectedCommandValue"
+            :disabled="disabled || !hasCommandOptions"
+            @update:model-value="handleCommandChange"
+          >
+            <SelectTrigger class="composer-select composer-select-cmd">
+              <SelectValue placeholder="/ 命令" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem :value="NO_COMMAND_VALUE">普通消息</SelectItem>
+              <SelectGroup v-for="group in commandGroups" :key="group.label">
+                <SelectLabel>{{ group.label }}</SelectLabel>
+                <SelectItem v-for="command in group.items" :key="command.name" :value="command.name">
+                  /{{ command.name }}
+                </SelectItem>
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+
           <Select
             v-if="canChooseModel"
             :model-value="selectedModelValue"
@@ -542,6 +565,10 @@ onMounted(() => {
             </SelectContent>
           </Select>
         </div>
+
+        <div v-if="selectedCommandDescription" class="composer-command-hint">
+          {{ selectedCommandDescription }}
+        </div>
       </div>
     </div>
   </footer>
@@ -549,128 +576,102 @@ onMounted(() => {
 
 <style scoped>
 .composer {
-  padding: 0 0.875rem calc(0.875rem + env(safe-area-inset-bottom));
+  padding: 0 0.75rem calc(0.75rem + env(safe-area-inset-bottom));
   background: transparent;
 }
 
 .composer-embedded {
-  padding: 0 0.875rem 0.875rem;
+  padding: 0 0.75rem 0.75rem;
 }
 
 .composer-card {
   border: 1px solid var(--border);
-  border-radius: 1rem;
+  border-radius: 0.95rem;
   background: var(--card);
   overflow: hidden;
-}
-
-/* ── Meta bar ── */
-.composer-meta {
-  display: flex;
-  align-items: center;
-   justify-content: flex-start;
-  gap: 0.5rem;
-   padding: 0 0.75rem;
 }
 
 .composer-selects {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  flex: 1;
+  gap: 0.375rem;
+  flex-wrap: wrap;
   min-width: 0;
-   flex-wrap: wrap;
- }
-
-.composer-meta-top {
-  padding-top: 0.5rem;
-}
-
-.composer-meta-bottom {
-  padding-bottom: 0.75rem;
-}
-
-.composer-selects-top {
-  overflow: hidden;
-}
-
-.composer-selects-bottom {
-  justify-content: flex-start;
 }
 
 .composer-select {
-  flex: 1;
   min-width: 0;
-  max-width: 11rem;
-  height: 1.875rem;
-  font-size: 0.78rem;
+  height: 1.75rem;
+  font-size: 0.75rem;
+}
+
+.composer-selects-compact > * {
+  flex: 1 1 8rem;
+}
+
+.composer-select-agent {
+  max-width: 10rem;
 }
 
 .composer-select-model {
-  max-width: 14rem;
-}
-
-.composer-select-cmd {
   max-width: 12rem;
 }
 
+.composer-select-cmd {
+  max-width: 9.5rem;
+}
+
 .composer-select-variant {
-  max-width: 7rem;
+  max-width: 6rem;
 }
 
 .composer-select-empty {
   display: inline-flex;
   align-items: center;
-  height: 1.875rem;
+  min-width: 0;
+  height: 1.75rem;
   padding: 0 0.625rem;
   border: 1px solid var(--input);
-  border-radius: 0.5rem;
+  border-radius: 0.625rem;
   background: var(--background);
   color: var(--muted-foreground);
-  font-size: 0.78rem;
+  font-size: 0.75rem;
   white-space: nowrap;
 }
 
-.meta-shortcut {
-  color: var(--muted-foreground);
-  font-size: 0.75rem;
-  flex-shrink: 0;
-}
-
-/* ── Command hint ── */
 .composer-command-hint {
-  margin: 0.375rem 0.75rem 0;
-  padding: 0.4375rem 0.75rem;
-  border-radius: 0.75rem;
+  margin-top: 0.375rem;
+  padding: 0.4375rem 0.625rem;
+  border-radius: 0.625rem;
   background: color-mix(in srgb, var(--accent) 30%, transparent);
   color: var(--muted-foreground);
-  font-size: 0.75rem;
-  line-height: 1.5;
+  font-size: 0.72rem;
+  line-height: 1.45;
 }
 
 .composer-attachments {
   display: grid;
-  gap: 0.5rem;
-  padding: 0.5rem 0.75rem 0;
+  gap: 0.375rem;
+  padding: 0.5rem 0.625rem 0;
 }
 
 .composer-attachment-list {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.625rem;
+  gap: 0.5rem;
 }
 
 .composer-attachment-chip {
   display: grid;
-  gap: 0.375rem;
-  width: 5.5rem;
+  gap: 0.3125rem;
+  width: 4.5rem;
 }
 
 .composer-attachment-thumb {
-  width: 5.5rem;
-  height: 5.5rem;
+  width: 4.5rem;
+  height: 4.5rem;
   border: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
-  border-radius: 0.875rem;
+  border-radius: 0.75rem;
   object-fit: cover;
   background: color-mix(in srgb, var(--muted) 68%, white 32%);
 }
@@ -684,7 +685,7 @@ onMounted(() => {
 .composer-attachment-name {
   flex: 1;
   min-width: 0;
-  font-size: 0.68rem;
+  font-size: 0.64rem;
   color: var(--muted-foreground);
   white-space: nowrap;
   overflow: hidden;
@@ -693,8 +694,8 @@ onMounted(() => {
 
 .composer-attachment-remove {
   display: grid;
-  width: 1.4rem;
-  height: 1.4rem;
+  width: 1.25rem;
+  height: 1.25rem;
   place-items: center;
   border: 0;
   border-radius: 999px;
@@ -711,71 +712,126 @@ onMounted(() => {
 .composer-image-error {
   margin: 0;
   color: #b42318;
-  font-size: 0.75rem;
+  font-size: 0.72rem;
 }
 
-/* ── Input area ── */
 .composer-input-wrap {
   display: flex;
   align-items: flex-end;
-   gap: 0.625rem;
-    padding: 0.5rem 0.75rem 0.75rem;
+  gap: 0.375rem;
+  padding: 0.5rem 0.625rem 0.5rem;
 }
 
 .composer-file-input {
   display: none;
 }
 
-.btn-attach {
+.btn-tool,
+.btn-send {
   flex-shrink: 0;
   display: grid;
-  width: 2.25rem;
-  height: 2.25rem;
+  width: 2rem;
+  height: 2rem;
   place-items: center;
   border: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
   border-radius: 0.625rem;
   background: color-mix(in srgb, var(--background) 90%, white 10%);
   color: var(--foreground);
-  transition: opacity 0.15s;
+  transition: opacity 0.15s, background-color 0.15s, border-color 0.15s;
   cursor: pointer;
 }
 
-.btn-attach:hover:not(:disabled) {
+.btn-tool:hover:not(:disabled),
+.btn-send:hover:not(:disabled) {
   opacity: 0.82;
 }
 
-.btn-attach:disabled {
+.btn-tool:disabled,
+.btn-send:disabled {
   opacity: 0.35;
   cursor: default;
 }
 
 .composer-input-shell {
-   flex: 1;
-   min-width: 0;
-   display: flex;
-   flex-direction: column;
-   gap: 0.35rem;
-   padding: 0.125rem 0 0;
-   border-bottom: 1px solid color-mix(in srgb, var(--border) 88%, transparent);
-   transition: border-color 0.18s ease;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.375rem 0.625rem;
+  border: 1px solid color-mix(in srgb, var(--input) 90%, var(--border));
+  border-radius: 0.8rem;
+  background: color-mix(in srgb, var(--background) 92%, white 8%);
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
 }
 
 .composer-input-shell:focus-within,
 .composer-input-shell-active {
-   border-bottom-color: color-mix(in srgb, var(--primary) 34%, var(--border));
+  border-color: color-mix(in srgb, var(--primary) 34%, var(--border));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 10%, transparent);
+}
+
+.composer-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.composer-status-chips {
+  display: flex;
+  align-items: center;
+  gap: 0.3125rem;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.composer-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-width: 0;
+  padding: 0.125rem 0.4375rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 72%, white 28%);
+  color: var(--foreground);
+  font-size: 0.68rem;
+  line-height: 1.2;
+}
+
+.composer-chip-command {
+  background: color-mix(in srgb, var(--primary) 12%, var(--accent));
+}
+
+.composer-chip-clear {
+  display: grid;
+  width: 0.95rem;
+  height: 0.95rem;
+  place-items: center;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  padding: 0;
+}
+
+.composer-chip-clear:disabled {
+  cursor: default;
+  opacity: 0.45;
 }
 
 .composer-input {
-   min-height: 2.25rem;
-   max-height: 13.75rem;
-   resize: none;
-   overflow-y: auto;
-   padding: 0.375rem 0 0;
-   border: 0;
-   background: transparent;
-   color: var(--foreground);
-  font-size: 0.9375rem;
-  line-height: 1.65;
+  min-height: 1.5rem;
+  max-height: 8.5rem;
+  resize: none;
+  overflow-y: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--foreground);
+  font-size: 0.92rem;
+  line-height: 1.45;
   outline: none;
 }
 
@@ -787,34 +843,18 @@ onMounted(() => {
   opacity: 0.5;
 }
 
-.composer-input-hint {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  padding-bottom: 0.125rem;
-  color: var(--muted-foreground);
-  font-size: 0.6875rem;
-  line-height: 1.4;
-}
-
 .composer-context-hint {
-  margin-left: auto;
+  flex-shrink: 0;
   white-space: nowrap;
+  color: var(--muted-foreground);
+  font-size: 0.68rem;
+  line-height: 1.2;
 }
 
 .btn-send {
-  flex-shrink: 0;
-  display: grid;
-  width: 2.25rem;
-  height: 2.25rem;
-  place-items: center;
   border: 0;
-  border-radius: 0.625rem;
   background: var(--primary);
   color: var(--primary-foreground);
-  transition: opacity 0.15s;
-  cursor: pointer;
 }
 
 .btn-stop {
@@ -822,17 +862,31 @@ onMounted(() => {
   color: var(--destructive-foreground);
 }
 
-.btn-send:hover:not(:disabled) {
-  opacity: 0.82;
-}
-
 .btn-send:active:not(:disabled) {
   opacity: 0.7;
 }
 
-.btn-send:disabled {
-  opacity: 0.35;
-  cursor: default;
+.btn-settings {
+  position: relative;
+}
+
+.btn-settings-active {
+  border-color: color-mix(in srgb, var(--primary) 34%, var(--border));
+  background: color-mix(in srgb, var(--primary) 10%, var(--background));
+}
+
+.btn-settings-dot {
+  position: absolute;
+  top: 0.32rem;
+  right: 0.32rem;
+  width: 0.36rem;
+  height: 0.36rem;
+  border-radius: 999px;
+  background: var(--primary);
+}
+
+.composer-advanced {
+  padding: 0 0.625rem 0.625rem;
 }
 
 @media (max-width: 640px) {
@@ -840,22 +894,30 @@ onMounted(() => {
     padding: 0 0.625rem calc(0.75rem + env(safe-area-inset-bottom));
   }
 
-  .composer-meta {
-    flex-direction: column;
-    align-items: stretch;
+  .composer-input-wrap {
+    gap: 0.3125rem;
+    padding: 0.375rem 0.625rem 0.625rem;
   }
 
-  .composer-selects {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    width: 100%;
+  .composer-attachments {
+    padding: 0.375rem 0.625rem 0;
   }
 
-  .composer-meta-bottom {
-    padding-bottom: 0.625rem;
+  .composer-attachment-chip {
+    width: 4.25rem;
+  }
+
+  .composer-attachment-thumb {
+    width: 4.25rem;
+    height: 4.25rem;
+  }
+
+  .composer-selects-compact > * {
+    flex-basis: calc(50% - 0.1875rem);
   }
 
   .composer-select,
+  .composer-select-agent,
   .composer-select-model,
   .composer-select-variant,
   .composer-select-cmd,
@@ -865,39 +927,17 @@ onMounted(() => {
   }
 
   .composer-select-cmd {
-    grid-column: 1 / -1;
+    flex-basis: 100%;
   }
 
-  .composer-input-wrap {
-    gap: 0.5rem;
-    padding: 0.375rem 0.625rem 0.625rem;
-  }
-
-  .composer-attachments {
-    padding: 0.375rem 0.625rem 0;
-  }
-
-  .composer-attachment-chip {
-    width: 4.75rem;
-  }
-
-  .composer-attachment-thumb {
-    width: 4.75rem;
-    height: 4.75rem;
-  }
-
-  .composer-input {
-    line-height: 1.58;
-  }
-
-  .composer-input-hint {
-    flex-direction: column;
+  .composer-status-row {
     align-items: flex-start;
-    gap: 0.125rem;
+    flex-direction: column;
+    gap: 0.25rem;
   }
 
-  .meta-shortcut {
-    display: none;
+  .composer-context-hint {
+    white-space: normal;
   }
 }
 </style>
