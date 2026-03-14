@@ -43,10 +43,10 @@
     "vue"
   ],
   "scripts": {
-    "dev": "vite --host 0.0.0.0 --port 9000 --strictPort",
+    "dev": "node ./bin/opchat.js dev",
     "build": "vue-tsc -b && vite build",
     "preview": "vite preview --host 0.0.0.0 --port 9000 --strictPort",
-    "dev:all": "bash ./scripts/dev-all.sh"
+    "dev:all": "npm run dev"
   },
   "dependencies": {
     "@opencode-ai/sdk": "^1.2.24",

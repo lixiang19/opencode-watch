@@ -9,6 +9,7 @@ import path from "node:path";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const projectRoot = path.resolve(__dirname, "..");
+const gitBridgeBin = path.join(projectRoot, "scripts", "git-bridge.js");
 const require = createRequire(import.meta.url);
 
 const viteBin = resolvePackageFile("vite", "bin/vite.js");
@@ -28,14 +29,14 @@ try {
       await runDev(extraArgs);
       break;
     case "web":
-      await runNodeTool(viteBin, ["--host", "0.0.0.0", "--port", vitePort(), "--strictPort", ...extraArgs]);
+      await runWeb(extraArgs);
       break;
     case "build":
       await runNodeTool(vueTscBin, ["-b"]);
       await runNodeTool(viteBin, ["build", ...extraArgs]);
       break;
     case "preview":
-      await runNodeTool(viteBin, ["preview", "--host", "0.0.0.0", "--port", vitePort(), "--strictPort", ...extraArgs]);
+      await runPreview(extraArgs);
       break;
     case "doctor":
       await runDoctor();
@@ -95,13 +96,73 @@ async function runDev(args) {
     env: process.env,
   });
 
-  children.push(opencodeChild, webChild);
+  const gitBridgeChild = spawn(process.execPath, [gitBridgeBin], {
+    cwd: projectRoot,
+    stdio: "inherit",
+    env: process.env,
+  });
+
+  children.push(opencodeChild, webChild, gitBridgeChild);
 
   opencodeChild.on("error", () => {
     cleanup("SIGTERM");
     console.error("Failed to start `opencode serve`. Make sure the `opencode` command is installed.");
     process.exit(1);
   });
+
+  await Promise.race(children.map((child) => waitForExit(child)));
+  cleanup("SIGTERM");
+}
+
+async function runWeb(args) {
+  await runManagedProcesses([
+    spawn(process.execPath, [gitBridgeBin], {
+      cwd: projectRoot,
+      stdio: "inherit",
+      env: process.env,
+    }),
+    spawn(process.execPath, [viteBin, "--host", "0.0.0.0", "--port", vitePort(), "--strictPort", ...args], {
+      cwd: projectRoot,
+      stdio: "inherit",
+      env: process.env,
+    }),
+  ]);
+}
+
+async function runPreview(args) {
+  await runManagedProcesses([
+    spawn(process.execPath, [gitBridgeBin], {
+      cwd: projectRoot,
+      stdio: "inherit",
+      env: process.env,
+    }),
+    spawn(process.execPath, [viteBin, "preview", "--host", "0.0.0.0", "--port", vitePort(), "--strictPort", ...args], {
+      cwd: projectRoot,
+      stdio: "inherit",
+      env: process.env,
+    }),
+  ]);
+}
+
+async function runManagedProcesses(children) {
+  let exiting = false;
+
+  const cleanup = (signal) => {
+    if (exiting) {
+      return;
+    }
+
+    exiting = true;
+    for (const child of children) {
+      if (!child.killed) {
+        child.kill(signal);
+      }
+    }
+  };
+
+  process.on("SIGINT", () => cleanup("SIGINT"));
+  process.on("SIGTERM", () => cleanup("SIGTERM"));
+  process.on("exit", () => cleanup("SIGTERM"));
 
   await Promise.race(children.map((child) => waitForExit(child)));
   cleanup("SIGTERM");
@@ -123,6 +184,11 @@ async function runDoctor() {
       label: "vue-tsc bin",
       ok: fs.existsSync(vueTscBin),
       detail: vueTscBin,
+    },
+    {
+      label: "git bridge",
+      ok: fs.existsSync(gitBridgeBin),
+      detail: gitBridgeBin,
     },
     {
       label: "opencode",

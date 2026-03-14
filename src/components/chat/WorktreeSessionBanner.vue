@@ -1,10 +1,18 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import { Copy, GitBranch, GitMerge, LoaderCircle, Trash2 } from 'lucide-vue-next'
+import { computed, ref, watch } from 'vue'
+import { Copy, GitBranch, GitMerge, LoaderCircle, Save, Trash2 } from 'lucide-vue-next'
 
 import Button from '@/components/ui/button/Button.vue'
 import Card from '@/components/ui/card/Card.vue'
+import Input from '@/components/ui/input/Input.vue'
 import { formatPathTail, quoteShellPath } from '@/composables/useOpencodeApp/helpers'
+import {
+  commitGitDirectory,
+  getGitDirectoryStatus,
+  mergeGitBranch,
+  removeGitWorktree,
+  type GitDirectoryStatus
+} from '@/lib/gitBridge'
 import { useOpencodeStore } from '@/stores/opencode'
 
 const emit = defineEmits<{
@@ -27,32 +35,44 @@ const props = defineProps<{
 const app = useOpencodeStore()
 const feedback = ref('')
 let feedbackTimer: number | null = null
-const pendingAction = ref<'merge' | 'remove' | ''>('')
+const pendingAction = ref<'status' | 'commit' | 'merge' | 'remove' | ''>('')
 const removeConfirmOpen = ref(false)
+const commitDialogOpen = ref(false)
+const commitMessage = ref('')
+const localStatusError = ref('')
+const worktreeStatus = ref<GitDirectoryStatus | null>(null)
+const rootStatus = ref<GitDirectoryStatus | null>(null)
 
 const mergeCommand = computed(() => {
-  if (!props.branch) {
+  if (!effectiveBranch.value) {
     return ''
   }
 
-  return `git -C ${quoteShellPath(props.rootDirectory)} merge ${quoteShellPath(props.branch)}`
+  return `git -C ${quoteShellPath(props.rootDirectory)} merge ${quoteShellPath(effectiveBranch.value)}`
 })
 
 const cleanupCommand = computed(() => {
   const commands = [`git -C ${quoteShellPath(props.rootDirectory)} worktree remove ${quoteShellPath(props.worktreeDirectory)}`]
-  if (props.branch) {
-    commands.push(`git -C ${quoteShellPath(props.rootDirectory)} branch -d ${quoteShellPath(props.branch)}`)
+  if (effectiveBranch.value) {
+    commands.push(`git -C ${quoteShellPath(props.rootDirectory)} branch -d ${quoteShellPath(effectiveBranch.value)}`)
   }
 
   return commands.join(' && ')
 })
 
+const effectiveBranch = computed(() => worktreeStatus.value?.branch || props.branch || '')
+const effectiveRootBranch = computed(() => rootStatus.value?.branch || props.rootBranch || '')
+const worktreeDirty = computed(() => worktreeStatus.value?.dirty ?? false)
+const rootDirty = computed(() => rootStatus.value?.dirty ?? false)
+const worktreeChangedCount = computed(() => worktreeStatus.value?.changedCount ?? 0)
+const rootChangedCount = computed(() => rootStatus.value?.changedCount ?? 0)
+
 const rootBranchLabel = computed(() => {
-  if (props.rootBranch) {
-    return props.rootBranch
+  if (effectiveRootBranch.value) {
+    return effectiveRootBranch.value
   }
 
-  if (props.rootBranchLoading) {
+  if (pendingAction.value === 'status' || props.rootBranchLoading) {
     return '正在读取主仓库分支...'
   }
 
@@ -60,16 +80,85 @@ const rootBranchLabel = computed(() => {
 })
 
 const branchLabel = computed(() => {
-  if (props.branch) {
-    return props.branch
+  if (effectiveBranch.value) {
+    return effectiveBranch.value
   }
 
-  if (props.branchLoading) {
+  if (pendingAction.value === 'status' || props.branchLoading) {
     return '正在读取分支...'
   }
 
   return '暂未拿到分支名'
 })
+
+const worktreeStateText = computed(() => {
+  if (pendingAction.value === 'status') {
+    return '正在检查 worktree 状态...'
+  }
+
+  if (worktreeDirty.value) {
+    return `worktree 还有 ${worktreeChangedCount.value} 个未提交改动，先提交再合并`
+  }
+
+  return 'worktree 工作区已干净'
+})
+
+const rootStateText = computed(() => {
+  if (pendingAction.value === 'status') {
+    return '正在检查主仓库状态...'
+  }
+
+  if (rootDirty.value) {
+    return `主仓库当前有 ${rootChangedCount.value} 个未提交改动，暂时不能合并`
+  }
+
+  return '主仓库工作区已干净'
+})
+
+watch(
+  () => [props.sessionId, props.rootDirectory, props.worktreeDirectory].join('|'),
+  () => {
+    void refreshStatuses()
+  },
+  { immediate: true }
+)
+
+function seedCommitMessage() {
+  commitMessage.value = `chore: save ${effectiveBranch.value || 'worktree'} changes`
+}
+
+async function refreshStatuses() {
+  if (!props.rootDirectory || !props.worktreeDirectory) {
+    return
+  }
+
+  pendingAction.value = 'status'
+  localStatusError.value = ''
+
+  const [nextWorktreeStatus, nextRootStatus, nextSessionInfo] = await Promise.allSettled([
+    getGitDirectoryStatus(props.worktreeDirectory),
+    getGitDirectoryStatus(props.rootDirectory),
+    app.ensureSessionWorktreeInfo(props.sessionId)
+  ])
+
+  if (nextWorktreeStatus.status === 'fulfilled') {
+    worktreeStatus.value = nextWorktreeStatus.value
+  } else {
+    localStatusError.value = nextWorktreeStatus.reason instanceof Error ? nextWorktreeStatus.reason.message : '读取 worktree 状态失败。'
+  }
+
+  if (nextRootStatus.status === 'fulfilled') {
+    rootStatus.value = nextRootStatus.value
+  } else if (!localStatusError.value) {
+    localStatusError.value = nextRootStatus.reason instanceof Error ? nextRootStatus.reason.message : '读取主仓库状态失败。'
+  }
+
+  if (nextSessionInfo.status === 'rejected' && !localStatusError.value) {
+    localStatusError.value = nextSessionInfo.reason instanceof Error ? nextSessionInfo.reason.message : '同步 worktree 信息失败。'
+  }
+
+  pendingAction.value = ''
+}
 
 async function copyText(label: string, text: string) {
   if (!text) {
@@ -92,9 +181,22 @@ async function mergeIntoRoot() {
     return
   }
 
+  if (worktreeDirty.value) {
+    seedCommitMessage()
+    commitDialogOpen.value = true
+    feedback.value = '当前 worktree 还有未提交改动，请先提交。'
+    return
+  }
+
+  if (rootDirty.value) {
+    feedback.value = `worktree 已经是干净的，但主仓库当前还有 ${rootChangedCount.value} 个未提交改动，请先在主仓库处理。`
+    return
+  }
+
   pendingAction.value = 'merge'
   try {
-    await app.mergeWorktreeSession(props.sessionId)
+    await mergeGitBranch(props.rootDirectory, effectiveBranch.value)
+    await refreshStatuses()
     feedback.value = '已合并到主仓库当前分支'
   } catch (error) {
     feedback.value = error instanceof Error ? error.message : '合并失败，请在终端手动处理。'
@@ -111,11 +213,35 @@ async function removeWorktree() {
   removeConfirmOpen.value = false
   pendingAction.value = 'remove'
   try {
-    await app.removeWorktreeSession(props.sessionId)
+    await removeGitWorktree(props.rootDirectory, props.worktreeDirectory, effectiveBranch.value)
+    await app.archiveSession(props.sessionId, props.worktreeDirectory)
+    await app.refreshSessions({ reopen: false })
     feedback.value = 'Worktree 已删除，对话已从列表移除'
     emit('removed')
   } catch (error) {
     feedback.value = error instanceof Error ? error.message : '删除 Worktree 失败。'
+  } finally {
+    pendingAction.value = ''
+  }
+}
+
+async function commitWorktree() {
+  if (pendingAction.value || !commitMessage.value.trim()) {
+    return
+  }
+
+  pendingAction.value = 'commit'
+  try {
+    await commitGitDirectory(props.worktreeDirectory, commitMessage.value.trim())
+    commitDialogOpen.value = false
+    await refreshStatuses()
+    feedback.value = '当前 worktree 改动已提交'
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('没有可提交的改动')) {
+      feedback.value = '当前 worktree 已经是干净的，没有未提交改动；如果还不能合并，请看主仓库状态。'
+    } else {
+      feedback.value = error instanceof Error ? error.message : '提交失败，请检查 Git 配置。'
+    }
   } finally {
     pendingAction.value = ''
   }
@@ -137,11 +263,21 @@ async function removeWorktree() {
         <span>主仓库 {{ formatPathTail(rootDirectory, 3) }}</span>
         <span>工作目录 {{ formatPathTail(worktreeDirectory, 4) }}</span>
       </div>
+      <div class="worktree-status-row">
+        <span>{{ rootStateText }}</span>
+        <span>{{ worktreeStateText }}</span>
+      </div>
+      <p v-if="localStatusError" class="worktree-error">{{ localStatusError }}</p>
       <p v-if="rootBranchError || branchError" class="worktree-error">{{ rootBranchError || branchError }}</p>
       <p v-else class="worktree-tip">结束后回到主仓库执行合并，再删除 worktree。</p>
     </div>
 
     <div class="worktree-actions">
+      <Button variant="outline" size="sm" :disabled="pendingAction === 'merge' || pendingAction === 'remove'" @click="seedCommitMessage(); commitDialogOpen = true">
+        <LoaderCircle v-if="pendingAction === 'commit'" class="h-3.5 w-3.5 animate-spin" />
+        <Save v-else class="h-3.5 w-3.5" />
+        {{ pendingAction === 'commit' ? '正在提交...' : '提交改动' }}
+      </Button>
       <Button variant="outline" size="sm" :disabled="!mergeCommand || pendingAction === 'remove'" @click="mergeIntoRoot">
         <LoaderCircle v-if="pendingAction === 'merge'" class="h-3.5 w-3.5 animate-spin" />
         <GitMerge v-else class="h-3.5 w-3.5" />
@@ -179,6 +315,30 @@ async function removeWorktree() {
         </div>
       </Card>
     </div>
+
+    <div v-if="commitDialogOpen" class="worktree-confirm" role="dialog" aria-modal="true" aria-labelledby="worktree-commit-title">
+      <div class="worktree-confirm-backdrop" @click="commitDialogOpen = false" />
+      <Card class="worktree-confirm-card">
+        <h3 id="worktree-commit-title">提交当前 Worktree 改动</h3>
+        <p>会在 worktree 内执行 `git add -A` 和 `git commit -m ...`，提交后才能真正合并回主仓库。</p>
+        <div class="worktree-confirm-meta">
+          <span>分支：{{ branchLabel }}</span>
+          <span>待提交文件：{{ worktreeChangedCount }}</span>
+        </div>
+        <label class="worktree-commit-field">
+          <span>Commit message</span>
+          <Input v-model="commitMessage" placeholder="chore: save worktree changes" @keydown.enter.prevent="commitWorktree" />
+        </label>
+        <div class="worktree-confirm-actions">
+          <Button variant="outline" :disabled="pendingAction === 'commit'" @click="commitDialogOpen = false">取消</Button>
+          <Button :disabled="pendingAction === 'commit' || !commitMessage.trim()" @click="commitWorktree">
+            <LoaderCircle v-if="pendingAction === 'commit'" class="h-4 w-4 animate-spin" />
+            <Save v-else class="h-4 w-4" />
+            {{ pendingAction === 'commit' ? '提交中...' : '确认提交' }}
+          </Button>
+        </div>
+      </Card>
+    </div>
   </div>
 </template>
 
@@ -206,6 +366,7 @@ async function removeWorktree() {
 .worktree-title-row,
 .worktree-meta-row,
 .worktree-path-row,
+.worktree-status-row,
 .worktree-actions {
   display: flex;
   flex-wrap: wrap;
@@ -231,6 +392,7 @@ async function removeWorktree() {
 
 .worktree-meta-row,
 .worktree-path-row,
+.worktree-status-row,
 .worktree-tip,
 .worktree-error {
   font-size: 0.78rem;
@@ -292,6 +454,20 @@ async function removeWorktree() {
   gap: 0.35rem;
   margin-top: 0.85rem;
   font-size: 0.8rem;
+}
+
+.worktree-commit-field {
+  display: grid;
+  gap: 0.45rem;
+  margin-top: 0.9rem;
+}
+
+.worktree-commit-field span {
+  color: var(--muted-foreground);
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
 }
 
 .worktree-confirm-actions {

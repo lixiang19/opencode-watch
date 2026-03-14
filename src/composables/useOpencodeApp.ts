@@ -117,8 +117,6 @@ export function useOpencodeApp() {
   const chatOptionsRequests = new Map<string, Promise<ChatOptionsSnapshot>>()
   const worktreeBranchState = ref<Record<string, { branch: string; loading: boolean; error: string }>>({})
   const worktreeBranchRequests = new Map<string, Promise<string>>()
-  const ptyExitCodes = new Map<string, number>()
-  const ptyExitWaiters = new Map<string, { resolve: (code: number) => void; reject: (error: Error) => void; timer: number }>()
 
   const hasAuthCredentials = computed(() => Boolean(username.value.trim()) && Boolean(password.value.trim()))
   const authGateVisible = computed(() => !authValidated.value)
@@ -372,111 +370,6 @@ export function useOpencodeApp() {
     return getSessionWorktreeInfo(sessionId)
   }
 
-  function waitForPtyExit(ptyID: string, timeoutMs = 120000) {
-    const cachedExitCode = ptyExitCodes.get(ptyID)
-    if (typeof cachedExitCode === 'number') {
-      ptyExitCodes.delete(ptyID)
-      return Promise.resolve(cachedExitCode)
-    }
-
-    return new Promise<number>((resolve, reject) => {
-      const timer = window.setTimeout(() => {
-        ptyExitWaiters.delete(ptyID)
-        reject(new Error('等待 Git 命令执行结果超时，请在终端手动确认。'))
-      }, timeoutMs)
-
-      ptyExitWaiters.set(ptyID, {
-        resolve: (code) => {
-          window.clearTimeout(timer)
-          ptyExitWaiters.delete(ptyID)
-          ptyExitCodes.delete(ptyID)
-          resolve(code)
-        },
-        reject: (error) => {
-          window.clearTimeout(timer)
-          ptyExitWaiters.delete(ptyID)
-          reject(error)
-        },
-        timer
-      })
-    })
-  }
-
-  async function runGitCommandInProject(projectDirectory: string, args: string[], title: string) {
-    const normalizedDirectory = normalizeDirectory(projectDirectory)
-    if (!normalizedDirectory) {
-      throw new Error('缺少项目目录，无法执行 Git 命令。')
-    }
-
-    const currentClient = getClient(normalizedDirectory)
-    const { data: pty } = await currentClient.pty.create({
-      directory: normalizedDirectory,
-      cwd: normalizedDirectory,
-      command: 'git',
-      args,
-      title
-    })
-
-    if (!pty?.id) {
-      throw new Error('Git 命令启动失败。')
-    }
-
-    const exitCode = await waitForPtyExit(pty.id)
-    void currentClient.pty.remove({ ptyID: pty.id, directory: normalizedDirectory }).catch(() => undefined)
-
-    if (exitCode !== 0) {
-      throw new Error(`Git 命令执行失败（退出码 ${exitCode}）。如果有冲突，请到主仓库终端手动处理。`)
-    }
-  }
-
-  async function mergeWorktreeSession(sessionId: string) {
-    const info = await ensureSessionWorktreeInfo(sessionId)
-    if (!info) {
-      throw new Error('当前对话不是 Worktree 对话。')
-    }
-
-    if (!info.branch) {
-      throw new Error('暂时拿不到 Worktree 分支名，请稍后重试。')
-    }
-
-    await runGitCommandInProject(info.rootDirectory, ['merge', info.branch], `Merge ${info.branch}`)
-    await ensureWorktreeBranch(info.rootDirectory).catch(() => '')
-    return getSessionWorktreeInfo(sessionId)
-  }
-
-  async function removeWorktreeSession(sessionId: string) {
-    const info = await ensureSessionWorktreeInfo(sessionId)
-    if (!info) {
-      throw new Error('当前对话不是 Worktree 对话。')
-    }
-
-    const currentClient = getClient(info.rootDirectory)
-    await currentClient.worktree.remove({
-      directory: info.rootDirectory,
-      worktreeRemoveInput: {
-        directory: info.worktreeDirectory
-      }
-    })
-
-    try {
-      await currentClient.session.update({
-        sessionID: sessionId,
-        directory: info.worktreeDirectory,
-        time: {
-          archived: Date.now()
-        }
-      })
-    } catch (error) {
-      console.warn('[opencode:worktree] worktree removed but session archive failed', error)
-    }
-
-    const nextBranchState = { ...worktreeBranchState.value }
-    delete nextBranchState[info.worktreeDirectory]
-    worktreeBranchState.value = nextBranchState
-    await refreshSessions({ reopen: false })
-    return true
-  }
-
   const pwaManager = createPwaManager({
     activeSession,
     sessions
@@ -583,12 +476,6 @@ export function useOpencodeApp() {
     chatOptionsRequests.clear()
     worktreeBranchRequests.clear()
     worktreeBranchState.value = {}
-    for (const { reject, timer } of ptyExitWaiters.values()) {
-      window.clearTimeout(timer)
-      reject(new Error('连接已断开，Git 命令结果已取消。'))
-    }
-    ptyExitWaiters.clear()
-    ptyExitCodes.clear()
     availableAgents.value = []
     availableCommands.value = []
     availableModels.value = []
@@ -1130,6 +1017,22 @@ export function useOpencodeApp() {
     return data as Project | undefined
   }
 
+  async function archiveSession(sessionId: string, directory?: string | null) {
+    const normalizedSessionId = sessionId.trim()
+    const normalizedDirectory = normalizeDirectory(directory)
+    if (!normalizedSessionId) {
+      throw new Error('缺少会话 ID，无法归档对话。')
+    }
+
+    await getClient(normalizedDirectory).session.update({
+      sessionID: normalizedSessionId,
+      directory: normalizedDirectory || undefined,
+      time: {
+        archived: Date.now()
+      }
+    })
+  }
+
   async function connect() {
     if (!hasAuthCredentials.value) {
       lastError.value = '请先填写认证账号和密码。'
@@ -1200,21 +1103,6 @@ export function useOpencodeApp() {
 
     if (event.type === 'vcs.branch.updated' && eventDirectory) {
       cacheWorktreeBranch(eventDirectory, (event.properties as { branch?: string }).branch || '')
-    }
-
-    if (event.type === 'pty.exited') {
-      const { id, exitCode } = event.properties as { id: string; exitCode: number }
-      const waiter = ptyExitWaiters.get(id)
-      if (waiter) {
-        waiter.resolve(exitCode)
-      } else {
-        ptyExitCodes.set(id, exitCode)
-      }
-    }
-
-    if (event.type === 'pty.deleted') {
-      const { id } = event.properties as { id: string }
-      ptyExitCodes.delete(id)
     }
 
     if (event.type === 'session.error') {
@@ -1391,10 +1279,10 @@ export function useOpencodeApp() {
     hasTruncatedMessages,
     getSessionListBadges,
     clearSessionListBadges,
+    archiveSession,
     connect,
     refreshSessions,
     loadMoreProjectSessions,
-    mergeWorktreeSession,
     openSession,
     openDesktopSession,
     createSession,
@@ -1402,7 +1290,6 @@ export function useOpencodeApp() {
     createDesktopSession,
     createDesktopWorktreeSession,
     closeDesktopSession,
-    removeWorktreeSession,
     stopCurrentSession,
     stopDesktopSession,
     sendPromptToSession,
