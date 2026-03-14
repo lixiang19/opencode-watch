@@ -8,10 +8,37 @@ import { useOpencodeStore } from '@/stores/opencode'
 
 const app = useOpencodeStore()
 
-const canSubmit = computed(() => Boolean(app.username.trim()) && Boolean(app.password.trim()))
+const isAdminMode = computed(() => app.authGateMode === 'admin')
+const passwordModel = computed({
+  get: () => (isAdminMode.value ? app.adminPassword : app.password),
+  set: (value: string) => {
+    if (isAdminMode.value) {
+      app.adminPassword = value
+      return
+    }
+
+    app.password = value
+  }
+})
+const canSubmit = computed(() => {
+  if (isAdminMode.value) {
+    return Boolean(app.adminPassword.trim())
+  }
+
+  return Boolean(app.username.trim()) && Boolean(app.password.trim())
+})
 
 async function submitAuth() {
-  if (!canSubmit.value || app.isConnecting) {
+  if (!canSubmit.value) {
+    return
+  }
+
+  if (isAdminMode.value) {
+    await app.loginAdmin()
+    return
+  }
+
+  if (app.isConnecting) {
     return
   }
 
@@ -28,32 +55,33 @@ async function submitAuth() {
         <ShieldAlert class="h-5 w-5" />
       </div>
 
-      <p class="auth-gate-kicker">认证已启用</p>
-      <h2 id="auth-gate-title">先完成账号验证</h2>
+      <p class="auth-gate-kicker">{{ isAdminMode ? '管理端鉴权' : 'OpenCode 认证' }}</p>
+      <h2 id="auth-gate-title">{{ isAdminMode ? '先完成管理登录' : '先完成账号验证' }}</h2>
       <p class="auth-gate-copy">{{ app.authGateMessage }}</p>
 
       <form class="auth-gate-form" @submit.prevent="submitAuth">
-        <label class="settings-field">
+        <label v-if="!isAdminMode" class="settings-field">
           <span>认证账号</span>
           <Input v-model="app.username" placeholder="请输入账号" autocomplete="username" autofocus />
         </label>
 
         <label class="settings-field">
-          <span>认证密码</span>
+          <span>{{ isAdminMode ? '管理密码' : '认证密码' }}</span>
           <Input
-            v-model="app.password"
+            v-model="passwordModel"
             type="password"
-            placeholder="请输入密码"
+            :placeholder="isAdminMode ? '请输入管理密码' : '请输入认证密码'"
             autocomplete="current-password"
+            :autofocus="isAdminMode"
           />
         </label>
 
 
 
-        <Button class="auth-gate-submit" type="submit" :disabled="!canSubmit || app.isConnecting">
-          <RefreshCw v-if="app.isConnecting" class="h-4 w-4 animate-spin" />
+        <Button class="auth-gate-submit" type="submit" :disabled="!canSubmit || (isAdminMode ? app.isAdminAuthenticating : app.isConnecting)">
+          <RefreshCw v-if="isAdminMode ? app.isAdminAuthenticating : app.isConnecting" class="h-4 w-4 animate-spin" />
           <ShieldAlert v-else class="h-4 w-4" />
-          {{ app.isConnecting ? '验证中...' : '验证并进入' }}
+          {{ isAdminMode ? (app.isAdminAuthenticating ? '登录中...' : '登录并进入') : (app.isConnecting ? '验证中...' : '验证并进入') }}
         </Button>
       </form>
     </section>

@@ -184,13 +184,12 @@ const draftProject = computed(() => {
 })
 
 async function createForProject(directory: string) {
-  app.draftDirectory = directory
-  const sessionId = await app.createSession(directory)
-  if (!sessionId) {
+  const ready = await app.prepareDraftSession(directory)
+  if (!ready) {
     return
   }
 
-  void router.push({ name: 'session', params: { sessionId } })
+  void router.push({ name: 'session-draft' })
 }
 
 function openWorktreeDialog(directory: string, projectName: string) {

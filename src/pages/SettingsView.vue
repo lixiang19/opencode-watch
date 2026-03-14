@@ -23,19 +23,69 @@ const app = useOpencodeStore()
 const connectionTone = computed(() => (app.streamReady ? 'status-ok' : 'status-error'))
 const serverEndpoint = computed(() => {
   try {
-    const url = new URL(app.serverUrl)
+    const baseOrigin = typeof window === 'undefined' ? 'http://127.0.0.1:9001' : window.location.origin
+    const url = new URL(app.serverUrl, baseOrigin)
     return {
-      origin: url.origin,
+      href: url.toString(),
       host: url.hostname,
-      port: url.port || (url.protocol === 'https:' ? '443' : '80')
+      port: url.port || (url.protocol === 'https:' ? '443' : '80'),
+      path: url.pathname
     }
   } catch {
     return {
-      origin: app.serverUrl,
+      href: app.serverUrl,
       host: '--',
-      port: '--'
+      port: '--',
+      path: '--'
     }
   }
+})
+
+const localRuntimeTone = computed(() => {
+  if (!app.localRuntimeStatus) {
+    return 'status-muted'
+  }
+
+  return app.localRuntimeStatus.managedOpencode.running ? 'status-ok' : 'status-error'
+})
+
+const localBackendEndpoint = computed(() => {
+  if (!app.localRuntimeStatus) {
+    return '--'
+  }
+
+  return `http://${app.localRuntimeStatus.backend.host}:${app.localRuntimeStatus.backend.port}`
+})
+
+const managedOpencodeEndpoint = computed(() => app.localRuntimeStatus?.managedOpencode.baseUrl || 'http://127.0.0.1:4096')
+
+const localRuntimeStatusText = computed(() => {
+  if (!app.localRuntimeStatus) {
+    return '本地服务未连接'
+  }
+
+  if (app.localRuntimeStatus.managedOpencode.running) {
+    return '本地服务与 OpenCode 已就绪'
+  }
+
+  return app.localRuntimeStatus.managedOpencode.lastError || '本地服务已启动，但 OpenCode 还没就绪'
+})
+
+const adminTone = computed(() => (app.adminAuthenticated ? 'status-ok' : 'status-error'))
+const adminStatusText = computed(() => {
+  if (!app.adminSessionReady) {
+    return '正在检查管理会话'
+  }
+
+  return app.adminAuthenticated ? '管理会话已建立' : '管理会话未登录'
+})
+
+const adminHintText = computed(() => {
+  if (app.adminAuthenticated) {
+    return app.adminSessionExpiresAt ? `当前会话有效期已延长到 ${new Date(app.adminSessionExpiresAt).toLocaleString()}` : '当前浏览器已拿到服务端会话 Cookie。'
+  }
+
+  return app.adminAuthError || '未登录时，Git、重启和同源 OpenCode 代理都不会开放。'
 })
 
 const notificationTone = computed(() => {
@@ -129,16 +179,20 @@ const installStatusText = computed(() => {
             </div>
             <div class="form-group">
               <label>opencode 地址</label>
-              <Input v-model="app.serverUrl" placeholder="http://127.0.0.1:4096" autocomplete="url" />
+              <Input v-model="app.serverUrl" placeholder="/oc" autocomplete="url" />
             </div>
             <div class="endpoint-grid">
               <div class="endpoint-tile">
-                <span class="endpoint-label">当前地址</span>
-                <strong>{{ serverEndpoint.origin }}</strong>
+                <span class="endpoint-label">当前入口</span>
+                <strong>{{ serverEndpoint.href }}</strong>
               </div>
               <div class="endpoint-tile">
                 <span class="endpoint-label">主机</span>
                 <strong>{{ serverEndpoint.host }}</strong>
+              </div>
+              <div class="endpoint-tile">
+                <span class="endpoint-label">路径</span>
+                <strong>{{ serverEndpoint.path }}</strong>
               </div>
               <div class="endpoint-tile">
                 <span class="endpoint-label">端口</span>
@@ -149,6 +203,38 @@ const installStatusText = computed(() => {
               <Info class="h-3 w-3" />
               <span>会话列表和实时推送只来自当前连接的这一个 opencode 服务实例。</span>
             </div>
+
+            <div class="status-tile" :class="localRuntimeTone">
+              <div class="status-tile-icon">
+                <RefreshCw class="h-5 w-5" :class="app.isRestartingOpencode ? 'animate-spin' : ''" />
+              </div>
+              <div class="status-tile-copy">
+                <strong>{{ localRuntimeStatusText }}</strong>
+                <p>聊天仍然直接连接 opencode；本地后端只负责 Git、重启和其他本机能力。</p>
+              </div>
+            </div>
+
+            <div class="endpoint-grid">
+              <div class="endpoint-tile">
+                <span class="endpoint-label">本地后端</span>
+                <strong>{{ localBackendEndpoint }}</strong>
+              </div>
+              <div class="endpoint-tile">
+                <span class="endpoint-label">受管 OpenCode</span>
+                <strong>{{ managedOpencodeEndpoint }}</strong>
+              </div>
+            </div>
+
+            <div class="status-tile" :class="adminTone">
+              <div class="status-tile-icon">
+                <ShieldCheck v-if="app.adminAuthenticated" class="h-5 w-5" />
+                <CircleAlert v-else class="h-5 w-5" />
+              </div>
+              <div class="status-tile-copy">
+                <strong>{{ adminStatusText }}</strong>
+                <p>{{ adminHintText }}</p>
+              </div>
+            </div>
           </div>
 
           <div class="section-divider"></div>
@@ -156,7 +242,7 @@ const installStatusText = computed(() => {
           <div class="form-section">
             <div class="section-header">
               <User class="h-4 w-4" />
-              <span>身份认证</span>
+              <span>OpenCode 认证</span>
             </div>
             <div class="form-group">
               <label>账号</label>
@@ -173,7 +259,7 @@ const installStatusText = computed(() => {
             </div>
             <div class="form-hint">
               <Info class="h-3 w-3" />
-              <span>账号密码仅用于本地认证，不会明文存储。</span>
+              <span>这里是 OpenCode 的 Basic Auth；用户名会持久化，密码只保存在当前浏览器会话。</span>
             </div>
           </div>
 
@@ -200,6 +286,14 @@ const installStatusText = computed(() => {
               <Button variant="outline" class="action-btn" :disabled="app.isRefreshing" @click="app.refreshSessions({ reopen: false, refreshProjects: true })">
                 <RefreshCw class="h-4 w-4 mr-2" :class="app.isRefreshing ? 'animate-spin' : ''" />
                 同步数据
+              </Button>
+              <Button variant="outline" class="action-btn" :disabled="app.isRestartingOpencode" @click="app.restartLocalOpencode">
+                <RefreshCw class="h-4 w-4 mr-2" :class="app.isRestartingOpencode ? 'animate-spin' : ''" />
+                {{ app.isRestartingOpencode ? '正在重启本地 OpenCode' : '重启本地 OpenCode' }}
+              </Button>
+              <Button variant="outline" class="action-btn" :disabled="!app.adminAuthenticated" @click="app.logoutAdmin">
+                <CircleAlert class="h-4 w-4 mr-2" />
+                退出管理登录
               </Button>
             </div>
           </div>
@@ -491,7 +585,7 @@ const installStatusText = computed(() => {
 
 .action-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
   gap: 1rem;
 }
 

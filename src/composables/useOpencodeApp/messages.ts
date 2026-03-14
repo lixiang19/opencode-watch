@@ -747,20 +747,6 @@ export function getEventSessionId(event: OpencodeEvent) {
   return ''
 }
 
-export function shouldRefreshSessionList(event: OpencodeEvent) {
-  switch (event.type) {
-    case 'session.created':
-    case 'session.updated':
-    case 'session.deleted':
-    case 'session.idle':
-    case 'message.updated':
-    case 'message.removed':
-      return true
-    default:
-      return false
-  }
-}
-
 export function getToolParts(message: ChatMessageRecord) {
   return message.parts.filter((part): part is ToolPart => part.type === 'tool')
 }

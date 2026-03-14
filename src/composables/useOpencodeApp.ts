@@ -41,12 +41,21 @@ import {
   applyEventToMessageCollection,
   getEventSessionId,
   isRenderableMessage,
-  pruneEmptyAssistantMessages,
-  shouldRefreshSessionList
+  pruneEmptyAssistantMessages
 } from '@/composables/useOpencodeApp/messages'
 import { createPwaManager } from '@/composables/useOpencodeApp/pwa'
 import { createSessionActions } from '@/composables/useOpencodeApp/sessionActions'
 import { createSessionStateManager } from '@/composables/useOpencodeApp/sessionState'
+import {
+  getAdminSessionStatus,
+  getLocalRuntimeStatus,
+  loginAdminSession,
+  logoutAdminSession,
+  restartManagedOpencode,
+  setLocalBackendCsrfToken,
+  type AdminSessionStatus,
+  type LocalRuntimeStatus
+} from '@/lib/localBackend'
 import {
   readSessionStorage,
   readStorage,
@@ -79,8 +88,59 @@ import type {
 
 type OpencodeClient = ReturnType<typeof createOpencodeClient>
 
+const LOCAL_OPENCODE_PROXY_PATH = '/oc'
+const LEGACY_LOCAL_OPENCODE_URLS = new Set(['http://127.0.0.1:4096', 'http://localhost:4096'])
+const ABSOLUTE_URL_PATTERN = /^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//
+
+function resolveInitialServerUrl() {
+  const storedValue = readStorage(STORAGE_KEYS.serverUrl, LOCAL_OPENCODE_PROXY_PATH).trim()
+  if (!storedValue) {
+    return LOCAL_OPENCODE_PROXY_PATH
+  }
+
+  return LEGACY_LOCAL_OPENCODE_URLS.has(storedValue) ? LOCAL_OPENCODE_PROXY_PATH : storedValue
+}
+
+function resolveInitialChatSelections() {
+  const migrationVersion = readStorage(STORAGE_KEYS.selectionMigration, '')
+  const storedAgentId = readStorage(STORAGE_KEYS.selectedAgent, '')
+  const storedModelKey = readStorage(STORAGE_KEYS.selectedModel, '')
+  const storedVariant = readStorage(STORAGE_KEYS.selectedVariant, '')
+
+  if (migrationVersion || storedAgentId !== 'build') {
+    return {
+      selectedAgentId: storedAgentId,
+      selectedModelKey: storedModelKey,
+      selectedVariant: storedVariant
+    }
+  }
+
+  writeStorage(STORAGE_KEYS.selectedAgent, '')
+  writeStorage(STORAGE_KEYS.selectedModel, '')
+  writeStorage(STORAGE_KEYS.selectedVariant, '')
+  writeStorage(STORAGE_KEYS.selectionMigration, 'v1')
+
+  return {
+    selectedAgentId: '',
+    selectedModelKey: '',
+    selectedVariant: ''
+  }
+}
+
+function resolveServerBaseUrl(value: string) {
+  const trimmed = value.trim() || LOCAL_OPENCODE_PROXY_PATH
+  if (ABSOLUTE_URL_PATTERN.test(trimmed)) {
+    return trimmed
+  }
+
+  const currentOrigin = typeof window === 'undefined' ? 'http://127.0.0.1:9001' : window.location.origin
+  return new URL(trimmed, currentOrigin).toString()
+}
+
 export function useOpencodeApp() {
-  const serverUrl = ref(readStorage(STORAGE_KEYS.serverUrl, 'http://127.0.0.1:4096'))
+  const initialChatSelections = resolveInitialChatSelections()
+  const serverUrl = ref(resolveInitialServerUrl())
+  const adminPassword = ref('')
   const username = ref(readStorage(STORAGE_KEYS.username, 'opencode'))
   const password = ref(readSessionStorage(STORAGE_KEYS.password, ''))
   const selectedSessionId = ref(readStorage(STORAGE_KEYS.selectedSession, ''))
@@ -88,12 +148,13 @@ export function useOpencodeApp() {
   const composerMode = ref<ComposerMode>(
     readStorage(STORAGE_KEYS.composerMode, 'prompt') === 'command' ? 'command' : 'prompt'
   )
-  const selectedAgentId = ref(readStorage(STORAGE_KEYS.selectedAgent, ''))
-  const selectedModelKey = ref(normalizeModelKey(readStorage(STORAGE_KEYS.selectedModel, '')))
-  const selectedVariant = ref(readStorage(STORAGE_KEYS.selectedVariant, ''))
+  const selectedAgentId = ref(initialChatSelections.selectedAgentId)
+  const selectedModelKey = ref(normalizeModelKey(initialChatSelections.selectedModelKey))
+  const selectedVariant = ref(initialChatSelections.selectedVariant)
   const defaultModelKey = ref('')
   const composerText = ref('')
   const selectedCommandName = ref('')
+  const singleDraftSession = ref(false)
   const availableAgents = ref<ChatAgentRecord[]>([])
   const availableCommands = ref<ChatCommandRecord[]>([])
   const availableModels = ref<ChatModelRecord[]>([])
@@ -107,13 +168,21 @@ export function useOpencodeApp() {
   const isSending = ref(false)
   const isRefreshing = ref(false)
   const isLoadingOlderMessages = ref(false)
+  const isAdminAuthenticating = ref(false)
+  const isRestartingOpencode = ref(false)
   const sessionStatus = ref<'idle' | 'busy'>('idle')
   const lastError = ref('')
+  const adminAuthError = ref('')
+  const adminSessionReady = ref(false)
+  const adminAuthenticated = ref(false)
   const streamReady = ref(false)
   const authValidated = ref(false)
   const historyMessageLimit = ref(INITIAL_HISTORY_LIMIT)
   const hasMoreHistory = ref(false)
   const sessionListUiState = ref<Record<string, SessionListUiState>>({})
+  const localRuntimeStatus = ref<LocalRuntimeStatus | null>(null)
+  const adminSessionExpiresAt = ref('')
+  const opencodeAuthRequested = ref(false)
 
   const clientCache = new Map<string, OpencodeClient>()
   const mobileSessionCache = new Map<string, CachedSessionState>()
@@ -128,10 +197,21 @@ export function useOpencodeApp() {
   const worktreeBranchRequests = new Map<string, Promise<string>>()
 
   const hasAuthCredentials = computed(() => Boolean(username.value.trim()) && Boolean(password.value.trim()))
-  const authGateVisible = computed(() => !authValidated.value)
+  const authGateMode = computed<'admin' | 'opencode' | null>(() => {
+    if (!adminSessionReady.value || !adminAuthenticated.value) {
+      return 'admin'
+    }
+
+    return !authValidated.value && opencodeAuthRequested.value ? 'opencode' : null
+  })
+  const authGateVisible = computed(() => authGateMode.value !== null)
   const authGateMessage = computed(() => {
+    if (authGateMode.value === 'admin') {
+      return adminAuthError.value || '请输入管理密码，先建立本地控制面的安全会话。'
+    }
+
     if (!hasAuthCredentials.value) {
-      return '当前服务已开启认证，必须先填写账号和密码。'
+      return '当前 OpenCode 服务开启了 Basic Auth，请填写账号和密码。'
     }
 
     return lastError.value || '请输入可用的认证信息并完成连接验证。'
@@ -516,13 +596,17 @@ export function useOpencodeApp() {
     isSending,
     lastError,
     messages,
+    mergeSessions,
     sessions,
     selectedAgent,
+    selectedAgentId,
     selectedCommand,
     selectedCommandName,
     selectedModel,
+    selectedModelKey,
     selectedVariant,
     selectedSessionId,
+    singleDraftSession,
     sessionPreviewMessages,
     sessionStatus,
     armCompletionNotice,
@@ -554,6 +638,7 @@ export function useOpencodeApp() {
     openDesktopSession,
     openSession,
     preloadSessionPreviews,
+    prepareDraftSession,
     rejectQuestion,
     replyPermission,
     replyQuestion,
@@ -590,7 +675,19 @@ export function useOpencodeApp() {
     lastError.value = parseError(error)
 
     if (isUnauthorizedError(error)) {
-      invalidateAuth()
+      void refreshAdminSession().then((session) => {
+        if (!session?.authenticated) {
+          adminAuthError.value = '管理登录已失效，请重新登录。'
+          adminAuthenticated.value = false
+          localRuntimeStatus.value = null
+          setLocalBackendCsrfToken('')
+          invalidateAuth()
+          return
+        }
+
+        opencodeAuthRequested.value = true
+        invalidateAuth()
+      })
     }
   }
 
@@ -791,6 +888,12 @@ export function useOpencodeApp() {
     selectedModelKey.value = nextSelections.selectedModelKey
   }
 
+  function rememberChatSelections(agentId: string, modelKey: string, variant: string) {
+    selectedAgentId.value = agentId
+    selectedModelKey.value = normalizeModelKey(modelKey)
+    selectedVariant.value = variant.trim()
+  }
+
   async function loadChatOptions(options: {
     directory?: string
     preferredAgentId?: string
@@ -811,6 +914,7 @@ export function useOpencodeApp() {
   function selectModel(modelKey: string) {
     selectedModelKey.value = normalizeModelKey(modelKey)
     selectedVariant.value = resolveVariantForModel(selectedModelKey.value, availableModels.value, selectedVariant.value)
+    rememberChatSelections(selectedAgentId.value, selectedModelKey.value, selectedVariant.value)
   }
 
   function selectAgent(agentId: string) {
@@ -820,6 +924,7 @@ export function useOpencodeApp() {
     const agentModel = availableAgents.value.find((agent) => agent.id === agentId)?.model
     if (!agentModel) {
       selectedVariant.value = resolveVariantForModel(selectedModelKey.value, availableModels.value, agentVariant || selectedVariant.value)
+      rememberChatSelections(selectedAgentId.value, selectedModelKey.value, selectedVariant.value)
       return
     }
 
@@ -829,6 +934,7 @@ export function useOpencodeApp() {
     }
 
     selectedVariant.value = resolveVariantForModel(selectedModelKey.value, availableModels.value, agentVariant || selectedVariant.value)
+    rememberChatSelections(selectedAgentId.value, selectedModelKey.value, selectedVariant.value)
   }
 
   function selectDesktopModel(sessionId: string, modelKey: string) {
@@ -839,6 +945,7 @@ export function useOpencodeApp() {
       sessionState.availableModels,
       sessionState.selectedVariant
     )
+    rememberChatSelections(sessionState.selectedAgentId, sessionState.selectedModelKey, sessionState.selectedVariant)
   }
 
   function selectDesktopAgent(sessionId: string, agentId: string) {
@@ -853,6 +960,7 @@ export function useOpencodeApp() {
         sessionState.availableModels,
         agentVariant || sessionState.selectedVariant
       )
+      rememberChatSelections(sessionState.selectedAgentId, sessionState.selectedModelKey, sessionState.selectedVariant)
       return
     }
 
@@ -866,10 +974,12 @@ export function useOpencodeApp() {
       sessionState.availableModels,
       agentVariant || sessionState.selectedVariant
     )
+    rememberChatSelections(sessionState.selectedAgentId, sessionState.selectedModelKey, sessionState.selectedVariant)
   }
 
   function selectVariant(variant: string) {
     selectedVariant.value = resolveVariantForModel(selectedModelKey.value, availableModels.value, variant.trim())
+    rememberChatSelections(selectedAgentId.value, selectedModelKey.value, selectedVariant.value)
   }
 
   function selectDesktopVariant(sessionId: string, variant: string) {
@@ -879,6 +989,7 @@ export function useOpencodeApp() {
       sessionState.availableModels,
       variant.trim()
     )
+    rememberChatSelections(sessionState.selectedAgentId, sessionState.selectedModelKey, sessionState.selectedVariant)
   }
 
   function selectDesktopCommand(sessionId: string, commandName: string) {
@@ -944,7 +1055,8 @@ export function useOpencodeApp() {
   }
 
   async function fetchExperimentalSessions(options: { directory?: string; cursor?: number; limit: number }) {
-    const url = new URL('/experimental/session', serverUrl.value)
+    const baseUrl = resolveServerBaseUrl(serverUrl.value)
+    const url = new URL('experimental/session', baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`)
     url.searchParams.set('roots', 'true')
     url.searchParams.set('limit', String(options.limit))
 
@@ -1094,7 +1206,7 @@ export function useOpencodeApp() {
         selectedSessionId.value = ''
       }
 
-      if (!selectedSessionId.value) {
+      if (!selectedSessionId.value && !singleDraftSession.value) {
         selectedSessionId.value = nextSessions[0]?.id || nextSessions.find((session) => session.directory)?.id || ''
       }
 
@@ -1157,10 +1269,88 @@ export function useOpencodeApp() {
     })
   }
 
+  async function refreshAdminSession() {
+    try {
+      const session = await getAdminSessionStatus()
+      adminSessionReady.value = true
+      adminAuthenticated.value = session.authenticated
+      adminSessionExpiresAt.value = session.expiresAt || ''
+      if (!session.authenticated) {
+        localRuntimeStatus.value = null
+        return session
+      }
+
+      adminAuthError.value = ''
+      return session
+    } catch (error) {
+      adminSessionReady.value = true
+      adminAuthenticated.value = false
+      adminSessionExpiresAt.value = ''
+      adminAuthError.value = parseError(error)
+      localRuntimeStatus.value = null
+      setLocalBackendCsrfToken('')
+      return null
+    }
+  }
+
+  async function loginAdmin() {
+    if (!adminPassword.value.trim() || isAdminAuthenticating.value) {
+      return false
+    }
+
+    isAdminAuthenticating.value = true
+    adminAuthError.value = ''
+
+    try {
+      const session = await loginAdminSession(adminPassword.value.trim())
+      adminAuthenticated.value = true
+      adminSessionReady.value = true
+      adminSessionExpiresAt.value = session.expiresAt
+      adminPassword.value = ''
+      await refreshLocalRuntime()
+      await connect()
+      return true
+    } catch (error) {
+      adminAuthenticated.value = false
+      adminAuthError.value = parseError(error)
+      return false
+    } finally {
+      isAdminAuthenticating.value = false
+    }
+  }
+
+  async function logoutAdmin() {
+    try {
+      await logoutAdminSession()
+    } catch {
+      // 即使后端会话已失效，也要在本地清空状态。
+    }
+
+    adminAuthenticated.value = false
+    adminSessionReady.value = true
+    adminSessionExpiresAt.value = ''
+    adminAuthError.value = ''
+    adminPassword.value = ''
+    localRuntimeStatus.value = null
+    setLocalBackendCsrfToken('')
+    opencodeAuthRequested.value = false
+    invalidateAuth()
+  }
+
+  async function bootstrap() {
+    const session = await refreshAdminSession()
+    if (!session?.authenticated) {
+      return false
+    }
+
+    await refreshLocalRuntime()
+    await connect()
+    return true
+  }
+
   async function connect() {
-    if (!hasAuthCredentials.value) {
-      lastError.value = '请先填写认证账号和密码。'
-      invalidateAuth()
+    if (!adminAuthenticated.value) {
+      adminAuthError.value = '请先完成管理端登录。'
       return false
     }
 
@@ -1177,6 +1367,8 @@ export function useOpencodeApp() {
       await currentClient.global.health()
       await startEventStream()
       authValidated.value = true
+      opencodeAuthRequested.value = false
+      void refreshLocalRuntime()
 
       void Promise.allSettled([
         loadChatOptions(),
@@ -1193,11 +1385,54 @@ export function useOpencodeApp() {
 
       return true
     } catch (error) {
+      if (isUnauthorizedError(error)) {
+        opencodeAuthRequested.value = true
+      }
       handleRequestError(error)
       streamReady.value = false
       return false
     } finally {
       isConnecting.value = false
+    }
+  }
+
+  async function refreshLocalRuntime() {
+    try {
+      localRuntimeStatus.value = await getLocalRuntimeStatus()
+      return localRuntimeStatus.value
+    } catch {
+      localRuntimeStatus.value = null
+      return null
+    }
+  }
+
+  async function restartLocalOpencode() {
+    if (isRestartingOpencode.value) {
+      return false
+    }
+
+    isRestartingOpencode.value = true
+    streamReady.value = false
+    authValidated.value = false
+    clientCache.clear()
+    closeStream?.()
+    closeStream = null
+
+    try {
+      await restartManagedOpencode()
+      await refreshLocalRuntime()
+
+      const connected = await connect()
+      if (!connected) {
+        throw new Error(lastError.value || '本地 OpenCode 已重启，但重新连接失败。')
+      }
+
+      return true
+    } catch (error) {
+      lastError.value = parseError(error)
+      return false
+    } finally {
+      isRestartingOpencode.value = false
     }
   }
 
@@ -1240,8 +1475,6 @@ export function useOpencodeApp() {
 
     if (event.type === 'session.created') {
       scheduleSessionListRefresh({ newSessionId: eventSessionId })
-    } else if (shouldRefreshSessionList(event)) {
-      scheduleSessionListRefresh()
     }
 
     if (event.type === 'session.idle') {
@@ -1375,6 +1608,7 @@ export function useOpencodeApp() {
       return
     }
 
+    opencodeAuthRequested.value = true
     invalidateAuth()
     lastError.value = ''
     writeStorage(STORAGE_KEYS.username, nextUsername)
@@ -1402,6 +1636,7 @@ export function useOpencodeApp() {
 
   onMounted(() => {
     disposePwa = mountPwa()
+    void bootstrap()
   })
 
   onBeforeUnmount(() => {
@@ -1413,8 +1648,13 @@ export function useOpencodeApp() {
 
   return {
     serverUrl,
+    adminPassword,
     username,
     password,
+    adminAuthenticated,
+    adminSessionReady,
+    adminSessionExpiresAt,
+    isAdminAuthenticating,
     hasAuthCredentials,
     notificationSupported,
     notificationPermission,
@@ -1423,7 +1663,9 @@ export function useOpencodeApp() {
     installAvailable,
     isPwaInstalled,
     authGateVisible,
+    authGateMode,
     authGateMessage,
+    adminAuthError,
     selectedSessionId,
     draftDirectory,
     composerMode,
@@ -1449,11 +1691,13 @@ export function useOpencodeApp() {
     isLoadingSession,
     isRefreshing,
     isLoadingOlderMessages,
+    isRestartingOpencode,
     isSending,
     sessionStatus,
     lastError,
     streamReady,
     authValidated,
+    localRuntimeStatus,
     connectionStateLabel,
     canCreateSession,
     ensureSessionWorktreeInfo,
@@ -1466,12 +1710,19 @@ export function useOpencodeApp() {
     getSessionListBadges,
     clearSessionListBadges,
     archiveSession,
+    loginAdmin,
+    logoutAdmin,
+    bootstrap,
     connect,
+    restartLocalOpencode,
+    refreshAdminSession,
+    refreshLocalRuntime,
     refreshSessions,
     loadMoreProjectSessions,
     openSession,
     openDesktopSession,
     createSession,
+    prepareDraftSession,
     createWorktreeSession,
     createDesktopSession,
     createDesktopWorktreeSession,

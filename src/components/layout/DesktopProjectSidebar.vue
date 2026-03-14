@@ -23,6 +23,7 @@ const props = withDefaults(
 
 const emit = defineEmits<{
   (event: 'open-session', sessionId: string): void
+  (event: 'open-new-session', directory: string): void
 }>()
 
 interface ProjectSessionGroup {
@@ -204,12 +205,7 @@ async function createSessionForProject(group: ProjectSessionGroup) {
   }
 
   app.draftDirectory = group.directory
-  const sessionId = await app.createDesktopSession(group.directory)
-  if (!sessionId) {
-    return
-  }
-
-  emit('open-session', sessionId)
+  emit('open-new-session', group.directory)
 }
 
 function openWorktreeDialog(group: ProjectSessionGroup) {

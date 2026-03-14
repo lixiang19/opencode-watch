@@ -9,7 +9,7 @@ import path from "node:path";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const projectRoot = path.resolve(__dirname, "..");
-const gitBridgeBin = path.join(projectRoot, "scripts", "git-bridge.js");
+const localBackendBin = path.join(projectRoot, "scripts", "local-backend.js");
 const require = createRequire(import.meta.url);
 
 const viteBin = resolvePackageFile("vite", "bin/vite.js");
@@ -52,96 +52,40 @@ try {
 }
 
 async function runDev(args) {
-  const children = [];
-  let exiting = false;
-
-  const cleanup = (signal) => {
-    if (exiting) {
-      return;
-    }
-
-    exiting = true;
-    for (const child of children) {
-      if (!child.killed) {
-        child.kill(signal);
-      }
-    }
-  };
-
-  process.on("SIGINT", () => cleanup("SIGINT"));
-  process.on("SIGTERM", () => cleanup("SIGTERM"));
-  process.on("exit", () => cleanup("SIGTERM"));
-
-  const opencodeChild = spawn(
-    "opencode",
-    [
-      "serve",
-      "--hostname=127.0.0.1",
-      `--port=${opencodePort()}`,
-      "--cors",
-      `http://127.0.0.1:${vitePort()}`,
-      "--cors",
-      `http://localhost:${vitePort()}`,
-    ],
-    {
-      cwd: opencodeRoot(),
-      stdio: "inherit",
-      env: process.env,
-    },
-  );
-
-  const webChild = spawn(process.execPath, [viteBin, "--host", "0.0.0.0", "--port", vitePort(), "--strictPort", ...args], {
+  const webChild = spawn(process.execPath, [viteBin, "--host", "127.0.0.1", "--port", vitePort(), "--strictPort", ...args], {
     cwd: projectRoot,
     stdio: "inherit",
     env: process.env,
   });
 
-  const gitBridgeChild = spawn(process.execPath, [gitBridgeBin], {
-    cwd: projectRoot,
-    stdio: "inherit",
-    env: process.env,
-  });
-
-  children.push(opencodeChild, webChild, gitBridgeChild);
-
-  opencodeChild.on("error", () => {
-    cleanup("SIGTERM");
-    console.error("Failed to start `opencode serve`. Make sure the `opencode` command is installed.");
-    process.exit(1);
-  });
-
-  await Promise.race(children.map((child) => waitForExit(child)));
-  cleanup("SIGTERM");
+  const backendChild = spawnLocalBackend({ OPCHAT_STATIC_MODE: "off" });
+  await runManagedProcesses([backendChild, webChild]);
 }
 
 async function runWeb(args) {
+  await runNodeTool(vueTscBin, ["-b"]);
+  await runNodeTool(viteBin, ["build", ...args]);
+
   await runManagedProcesses([
-    spawn(process.execPath, [gitBridgeBin], {
-      cwd: projectRoot,
-      stdio: "inherit",
-      env: process.env,
-    }),
-    spawn(process.execPath, [viteBin, "--host", "0.0.0.0", "--port", vitePort(), "--strictPort", ...args], {
-      cwd: projectRoot,
-      stdio: "inherit",
-      env: process.env,
-    }),
+    spawnLocalBackend({ OPCHAT_STATIC_MODE: "on" }),
   ]);
 }
 
 async function runPreview(args) {
   await runManagedProcesses([
-    spawn(process.execPath, [gitBridgeBin], {
-      cwd: projectRoot,
-      stdio: "inherit",
-      env: process.env,
-    }),
-    spawn(process.execPath, [viteBin, "preview", "--host", "0.0.0.0", "--port", vitePort(), "--strictPort", ...args], {
-      cwd: projectRoot,
-      stdio: "inherit",
-      env: process.env,
-    }),
+    spawnLocalBackend({ OPCHAT_STATIC_MODE: "on" }),
   ]);
+}
+
+function spawnLocalBackend(extraEnv = {}) {
+  return spawn(process.execPath, [localBackendBin], {
+    cwd: projectRoot,
+    stdio: "inherit",
+    env: {
+      ...process.env,
+      ...extraEnv,
+    },
+  });
 }
 
 async function runManagedProcesses(children) {
@@ -186,9 +130,9 @@ async function runDoctor() {
       detail: vueTscBin,
     },
     {
-      label: "git bridge",
-      ok: fs.existsSync(gitBridgeBin),
-      detail: gitBridgeBin,
+      label: "local backend",
+      ok: fs.existsSync(localBackendBin),
+      detail: localBackendBin,
     },
     {
       label: "opencode",
@@ -306,5 +250,5 @@ function resolvePackageFile(packageName, relativePath) {
 }
 
 function printHelp() {
-  console.log(`opchat <command>\n\nCommands:\n  dev      Start opencode server and web dev server\n  web      Start only the web dev server\n  build    Type-check and build the web app\n  preview  Preview the production build\n  doctor   Check local runtime dependencies\n  help     Show this help message`);
+  console.log(`opchat <command>\n\nCommands:\n  dev      Start local backend plus Vite dev server\n  web      Build and start the production web server\n  build    Type-check and build the web app\n  preview  Start the production web server without rebuilding\n  doctor   Check local runtime dependencies\n  help     Show this help message`);
 }

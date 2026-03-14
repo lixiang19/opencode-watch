@@ -14,12 +14,15 @@ const route = useRoute()
 const router = useRouter()
 const app = useOpencodeStore()
 
+const draftSessionTitle = computed(() => (route.name === 'session-draft' ? '新对话' : '对话详情'))
+const draftProjectName = computed(() => app.draftDirectory.trim() || '未绑定项目')
 const workingInfo = computed(() => getSessionWorkingInfo(app.messages, app.sessionStatus))
 const activeWorktreeInfo = computed(() => app.getSessionWorktreeInfo(app.selectedSessionId))
 
 async function syncSession(sessionId?: string | string[]) {
   const id = Array.isArray(sessionId) ? sessionId[0] : sessionId
   if (!id) {
+    await app.prepareDraftSession(app.draftDirectory)
     return
   }
 
@@ -39,11 +42,20 @@ function goBack() {
 }
 
 watch(
-  () => route.params.sessionId,
-  (id) => {
-    void syncSession(id)
+  () => [route.name, route.params.sessionId] as const,
+  ([name, id]) => {
+    void syncSession(name === 'session-draft' ? undefined : id)
   },
   { immediate: true }
+)
+
+watch(
+  () => app.selectedSessionId,
+  (sessionId) => {
+    if (route.name === 'session-draft' && sessionId) {
+      void router.replace({ name: 'session', params: { sessionId } })
+    }
+  }
 )
 
 watch(
@@ -61,8 +73,8 @@ watch(
 
 <template>
   <ChatPane
-    :title="app.activeSession?.title || '对话详情'"
-    :project-name="app.activeSession?.directory || '未绑定项目'"
+    :title="app.activeSession?.title || draftSessionTitle"
+    :project-name="app.activeSession?.directory || draftProjectName"
     :messages="app.visibleMessages"
     :connected="app.streamReady"
     :busy="app.sessionStatus === 'busy' || app.isSending"

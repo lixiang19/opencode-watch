@@ -12,7 +12,7 @@ import {
   mergeGitBranch,
   removeGitWorktree,
   type GitDirectoryStatus
-} from '@/lib/gitBridge'
+} from '@/lib/localBackend'
 import { useOpencodeStore } from '@/stores/opencode'
 
 const emit = defineEmits<{

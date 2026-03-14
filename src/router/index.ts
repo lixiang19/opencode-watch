@@ -37,6 +37,11 @@ export const router = createRouter({
       ]
     },
     {
+      path: '/conversations/new',
+      name: 'session-draft',
+      component: ChatView
+    },
+    {
       path: '/conversations/:sessionId',
       name: 'session',
       component: ChatView

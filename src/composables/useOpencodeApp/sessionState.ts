@@ -120,7 +120,9 @@ export function createSessionStateManager(args: {
   function syncDesktopSessionStates(sessionIds: string[]) {
     const validSessionIds = new Set(sessionIds)
     args.desktopSessions.value = Object.fromEntries(
-      Object.entries(args.desktopSessions.value).filter(([sessionId]) => validSessionIds.has(sessionId))
+      Object.entries(args.desktopSessions.value).filter(([sessionId, sessionState]) => {
+        return validSessionIds.has(sessionId)
+      })
     )
   }
 

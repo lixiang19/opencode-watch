@@ -3,7 +3,14 @@ import type { QuestionAnswer, QuestionRequest } from '@opencode-ai/sdk/v2/client
 
 import { getHistorySelection } from './catalog'
 import { HISTORY_LIMIT_STEP, INITIAL_HISTORY_LIMIT, SESSION_PREVIEW_MESSAGE_LIMIT } from './constants'
-import { buildWorktreeSessionName, isUnauthorizedError, makeModelKey, normalizeDirectory, normalizeModelKey, parseError } from './helpers'
+import {
+  buildWorktreeSessionName,
+  isUnauthorizedError,
+  makeModelKey,
+  normalizeDirectory,
+  normalizeModelKey,
+  parseError
+} from './helpers'
 import { applyQuestionAsked, buildSessionPreviewMessages, convertHistoryMessage, pruneEmptyAssistantMessages } from './messages'
 import type { CachedSessionState, MessageHistoryItem, SessionHistorySelection } from './types'
 import type {
@@ -13,6 +20,7 @@ import type {
   ChatMessageRecord,
   ChatModelRecord,
   ComposerMode,
+  SessionRecord,
   DesktopSessionState
 } from '@/types/opencode'
 
@@ -33,12 +41,16 @@ export function createSessionActions(args: {
   lastError: Ref<string>
   messages: Ref<ChatMessageRecord[]>
   sessions: Ref<Array<{ id: string; directory?: string | null }>>
+  mergeSessions: (nextSessions: SessionRecord[]) => SessionRecord[]
   selectedAgent: ComputedRef<ChatAgentRecord | null>
+  selectedAgentId: Ref<string>
   selectedCommand: ComputedRef<ChatCommandRecord | null>
   selectedCommandName: Ref<string>
   selectedModel: ComputedRef<ChatModelRecord | null>
+  selectedModelKey: Ref<string>
   selectedVariant: Ref<string>
   selectedSessionId: Ref<string>
+  singleDraftSession: Ref<boolean>
   sessionPreviewMessages: Ref<Record<string, ChatMessageRecord[]>>
   sessionStatus: Ref<'idle' | 'busy'>
   clearPendingCompletionNotice: (sessionId?: string) => void
@@ -68,6 +80,34 @@ export function createSessionActions(args: {
     }
 
     return normalizeDirectory(args.sessions.value.find((item) => item.id === sessionId)?.directory)
+  }
+
+  async function prepareDraftSession(directoryOverride?: string) {
+    const directory = normalizeDirectory(directoryOverride || args.draftDirectory.value)
+    if (!directory) {
+      args.lastError.value = '请先输入项目目录，或选择一个已有项目。'
+      return false
+    }
+
+    args.draftDirectory.value = directory
+    args.selectedSessionId.value = ''
+    args.singleDraftSession.value = true
+    args.isLoadingSession.value = false
+    args.isLoadingOlderMessages.value = false
+    args.isSending.value = false
+    args.sessionStatus.value = 'idle'
+    args.historyMessageLimit.value = INITIAL_HISTORY_LIMIT
+    args.hasMoreHistory.value = false
+    args.messages.value = []
+    args.lastError.value = ''
+    args.clearPendingCompletionNotice()
+    try {
+      await args.loadChatOptions({ directory })
+      return true
+    } catch (error) {
+      args.handleRequestError(error)
+      return false
+    }
   }
 
   function buildPromptParts(prompt: string, images: ComposerImageAttachment[]) {
@@ -190,6 +230,7 @@ export function createSessionActions(args: {
 
     args.suppressNextChatOptionLoad(sessionDirectory)
     args.selectedSessionId.value = sessionId
+    args.singleDraftSession.value = false
     args.lastError.value = ''
 
     if (cached && requestedLimit <= cached.historyMessageLimit) {
@@ -389,6 +430,19 @@ export function createSessionActions(args: {
       if (!session) {
         throw new Error('创建会话失败。')
       }
+
+      args.mergeSessions([
+        {
+          id: session.id,
+          title: session.title,
+          directory,
+          parentID: session.parentID,
+          time: {
+            created: session.time?.created ?? Date.now(),
+            updated: session.time?.updated ?? session.time?.created ?? Date.now()
+          }
+        }
+      ])
 
       await args.refreshSessions({ reopen: false })
 
@@ -601,9 +655,9 @@ export function createSessionActions(args: {
   }
 
   async function sendDesktopMessage(sessionId: string, prompt: string, images: ComposerImageAttachment[] = []) {
-    const sessionState = args.desktopSessions.value[sessionId] ?? args.ensureDesktopSessionState(sessionId)
+    const initialSessionState = args.desktopSessions.value[sessionId] ?? args.ensureDesktopSessionState(sessionId)
     const trimmedPrompt = prompt.trim()
-    const selectedCommandEntry = sessionState.availableCommands.find((command) => command.name === sessionState.selectedCommandName) ?? null
+    const selectedCommandEntry = initialSessionState.availableCommands.find((command) => command.name === initialSessionState.selectedCommandName) ?? null
     const manualCommand = !selectedCommandEntry && trimmedPrompt.startsWith('/') ? trimmedPrompt.slice(1).trim() : ''
     const [manualCommandName, ...manualCommandArgs] = manualCommand ? manualCommand.split(/\s+/) : []
     const commandName = selectedCommandEntry?.name || manualCommandName || ''
@@ -611,17 +665,26 @@ export function createSessionActions(args: {
     const hasCommand = Boolean(commandName)
     const promptParts = buildPromptParts(trimmedPrompt, images)
 
-    if ((!hasCommand && !promptParts.length) || sessionState.isSending) {
-      return false
+    if ((!hasCommand && !promptParts.length) || initialSessionState.isSending) {
+      return {
+        sent: false,
+        sessionId
+      }
     }
 
     if (hasCommand && images.length > 0) {
-      sessionState.lastError = '命令模式暂不支持附加图片，请切换为普通消息。'
-      return false
+      initialSessionState.lastError = '命令模式暂不支持附加图片，请切换为普通消息。'
+      return {
+        sent: false,
+        sessionId
+      }
     }
 
+    const targetSessionId = sessionId
+    const sessionState = initialSessionState
+
     if (!sessionState.messages.length) {
-      await openDesktopSession(sessionId)
+      await openDesktopSession(targetSessionId)
     }
 
     const selectedModelEntry = sessionState.availableModels.find((model) => model.key === normalizeModelKey(sessionState.selectedModelKey))
@@ -633,7 +696,7 @@ export function createSessionActions(args: {
       : undefined
     const agent = sessionState.availableAgents.find((item) => item.id === sessionState.selectedAgentId)?.id || undefined
     const variant = sessionState.selectedVariant || undefined
-    const directory = getSessionDirectory(sessionId)
+    const directory = getSessionDirectory(targetSessionId)
     const currentClient = args.getClient(directory)
 
     sessionState.isSending = true
@@ -643,7 +706,7 @@ export function createSessionActions(args: {
     try {
       if (hasCommand) {
         await currentClient.session.command({
-          sessionID: sessionId,
+          sessionID: targetSessionId,
           directory: directory || undefined,
           command: commandName,
           arguments: commandArgs || undefined,
@@ -653,7 +716,7 @@ export function createSessionActions(args: {
         })
       } else {
         await currentClient.session.prompt({
-          sessionID: sessionId,
+          sessionID: targetSessionId,
           directory: directory || undefined,
           agent,
           model,
@@ -663,13 +726,16 @@ export function createSessionActions(args: {
       }
 
       args.armCompletionNotice(
-        sessionId,
+        targetSessionId,
         hasCommand ? `/${commandName}${commandArgs ? ` ${commandArgs}` : ''}` : getPromptSummary(trimmedPrompt, images.length)
       )
       sessionState.selectedCommandName = ''
-      return true
+      return {
+        sent: true,
+        sessionId: targetSessionId
+      }
     } catch (error) {
-      args.clearPendingCompletionNotice(sessionId)
+      args.clearPendingCompletionNotice(targetSessionId)
       sessionState.lastError = parseError(error)
       sessionState.isSending = false
       sessionState.sessionStatus = 'idle'
@@ -678,7 +744,10 @@ export function createSessionActions(args: {
         args.invalidateAuth()
       }
 
-      return false
+      return {
+        sent: false,
+        sessionId: targetSessionId
+      }
     }
   }
 
@@ -759,6 +828,19 @@ export function createSessionActions(args: {
     }
 
     await openDesktopSession(sessionId, { force: true })
+
+    try {
+      const snapshot = await args.ensureChatOptionsSnapshot(getSessionDirectory(sessionId))
+      const sessionState = args.ensureDesktopSessionState(sessionId)
+      args.setDesktopSessionChatOptions(sessionState, snapshot, {
+        preferredAgentId: args.selectedAgentId.value,
+        preferredModelKey: args.selectedModelKey.value,
+        preferredVariant: args.selectedVariant.value
+      })
+    } catch {
+      // 会话已创建成功，选项拉取失败时保留 openDesktopSession 的结果。
+    }
+
     return sessionId
   }
 
@@ -769,6 +851,19 @@ export function createSessionActions(args: {
     }
 
     await openDesktopSession(sessionId, { force: true })
+
+    try {
+      const snapshot = await args.ensureChatOptionsSnapshot(getSessionDirectory(sessionId))
+      const sessionState = args.ensureDesktopSessionState(sessionId)
+      args.setDesktopSessionChatOptions(sessionState, snapshot, {
+        preferredAgentId: args.selectedAgentId.value,
+        preferredModelKey: args.selectedModelKey.value,
+        preferredVariant: args.selectedVariant.value
+      })
+    } catch {
+      // 会话已创建成功，选项拉取失败时保留 openDesktopSession 的结果。
+    }
+
     return sessionId
   }
 
@@ -851,6 +946,7 @@ export function createSessionActions(args: {
     openDesktopSession,
     openSession,
     preloadSessionPreviews,
+    prepareDraftSession,
     rejectQuestion,
     replyPermission,
     replyQuestion,

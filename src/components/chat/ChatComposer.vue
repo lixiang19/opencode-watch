@@ -134,7 +134,7 @@ const contextUsageText = computed(() => {
   return `上下文 ${formatTokenCount(used)} / ${formatTokenCount(limit)}`
 })
 const shouldShowStatusRow = computed(() => {
-  return hasSelectedCommand.value || hasAttachedImages.value || (showAdvancedControls.value && Boolean(contextUsageText.value))
+  return hasSelectedCommand.value || hasAttachedImages.value
 })
 
 function formatTokenCount(value: number) {
@@ -330,8 +330,8 @@ async function handleSend() {
       return
     }
 
-    const sent = await app.sendDesktopMessage(props.sessionId, text, attachedImages.value)
-    if (sent) {
+    const result = await app.sendDesktopMessage(props.sessionId, text, attachedImages.value)
+    if (result.sent) {
       localText.value = ''
       clearImages()
     }
@@ -456,13 +456,12 @@ onMounted(() => {
                 {{ attachedImages.length === 1 ? '1 张图片' : `${attachedImages.length} 张图片` }}
               </span>
             </div>
-            <span v-if="contextUsageText && showAdvancedControls" class="composer-context-hint">{{ contextUsageText }}</span>
           </div>
           <textarea
             ref="textareaEl"
             :value="composerValue"
             :disabled="disabled"
-            :placeholder="hasSelectedCommand ? '可直接发送命令，或补充说明…' : '发消息，Enter 发送，Shift + Enter 换行'"
+            :placeholder="hasSelectedCommand ? '可直接发送命令，或补充说明…' : '写点什么。。。'"
             class="composer-input soft-scrollbar"
             rows="1"
             @input="handleComposerInput(($event.target as HTMLTextAreaElement).value)"
@@ -568,6 +567,9 @@ onMounted(() => {
 
         <div v-if="selectedCommandDescription" class="composer-command-hint">
           {{ selectedCommandDescription }}
+        </div>
+        <div v-if="contextUsageText" class="composer-context-note">
+          {{ contextUsageText }}
         </div>
       </div>
     </div>
@@ -843,12 +845,12 @@ onMounted(() => {
   opacity: 0.5;
 }
 
-.composer-context-hint {
-  flex-shrink: 0;
-  white-space: nowrap;
+.composer-context-note {
+  margin-top: 0.375rem;
   color: var(--muted-foreground);
   font-size: 0.68rem;
   line-height: 1.2;
+  text-align: right;
 }
 
 .btn-send {
@@ -930,14 +932,8 @@ onMounted(() => {
     flex-basis: 100%;
   }
 
-  .composer-status-row {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 0.25rem;
-  }
-
-  .composer-context-hint {
-    white-space: normal;
+  .composer-context-note {
+    text-align: left;
   }
 }
 </style>

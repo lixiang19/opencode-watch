@@ -149,9 +149,7 @@ export function resolveChatSelections(snapshot: ChatOptionsSnapshot, options: Ch
   const agentIds = new Set(snapshot.agents.map((agent) => agent.id))
   const nextAgentId = [
     options.preferredAgentId,
-    options.currentAgentId,
-    snapshot.agents.find((agent) => agent.id === 'build')?.id,
-    snapshot.agents[0]?.id
+    options.currentAgentId
   ].find((candidate) => Boolean(candidate) && agentIds.has(candidate as string)) || ''
 
   const modelKeys = new Set(snapshot.models.map((model) => model.key))

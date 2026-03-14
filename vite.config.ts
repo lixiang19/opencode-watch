@@ -11,7 +11,21 @@ export default defineConfig({
     }
   },
   server: {
-    host: '0.0.0.0',
-    port: 9000
+    host: '127.0.0.1',
+    port: 9000,
+    proxy: {
+      '/api/admin': {
+        target: 'http://127.0.0.1:9001',
+        changeOrigin: false
+      },
+      '/api/auth': {
+        target: 'http://127.0.0.1:9001',
+        changeOrigin: false
+      },
+      '/oc': {
+        target: 'http://127.0.0.1:9001',
+        changeOrigin: false
+      }
+    }
   }
 })

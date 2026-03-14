@@ -6,9 +6,11 @@ import Button from '@/components/ui/button/Button.vue'
 import ChatComposer from '@/components/chat/ChatComposer.vue'
 import ChatPane from '@/components/chat/ChatPane.vue'
 import WorktreeSessionBanner from '@/components/chat/WorktreeSessionBanner.vue'
+import { normalizeDirectory } from '@/composables/useOpencodeApp/helpers'
 import DesktopProjectSidebar from '@/components/layout/DesktopProjectSidebar.vue'
 import { getSessionWorkingInfo } from '@/composables/useOpencodeApp/messages'
 import { useOpencodeStore } from '@/stores/opencode'
+import type { SessionRecord } from '@/types/opencode'
 
 const app = useOpencodeStore()
 
@@ -17,11 +19,28 @@ const openPanelIds = ref<string[]>([])
 const panelLoadingState = ref<Record<string, boolean>>({})
 const MIN_PANEL_PLACEHOLDER_MS = 220
 
-const openSessions = computed(() => {
+type SessionPanel = {
+  id: string
+  session: SessionRecord
+}
+
+type OpenPanel = SessionPanel
+
+const openPanels = computed<OpenPanel[]>(() => {
   const sessionMap = new Map(orderedSessions.value.map((session) => [session.id, session] as const))
   return openPanelIds.value
-    .map((sessionId) => sessionMap.get(sessionId))
-    .filter((session): session is (typeof orderedSessions.value)[number] => Boolean(session))
+    .map((panelId) => {
+      const session = sessionMap.get(panelId)
+      if (!session) {
+        return null
+      }
+
+      return {
+        id: panelId,
+        session
+      } satisfies SessionPanel
+    })
+    .filter((panel): panel is OpenPanel => Boolean(panel))
 })
 
 function formatSessionDirectory(directory?: string | null) {
@@ -58,6 +77,24 @@ function getPanelWorkingInfo(sessionId: string) {
 
 function getPanelWorktreeInfo(sessionId: string) {
   return app.getSessionWorktreeInfo(sessionId)
+}
+
+async function openNewSessionPanel(directory: string) {
+  const normalizedDirectory = normalizeDirectory(directory)
+  if (!normalizedDirectory) {
+    return
+  }
+
+  const sessionId = await app.createDesktopSession(normalizedDirectory)
+  if (!sessionId) {
+    return
+  }
+
+  if (!openPanelIds.value.includes(sessionId)) {
+    openPanelIds.value = [...openPanelIds.value, sessionId]
+  }
+
+  void app.ensureSessionWorktreeInfo(sessionId)
 }
 
 async function openPanel(sessionId: string) {
@@ -142,9 +179,7 @@ watch(
     for (const sessionId of removedIds) {
       app.closeDesktopSession(sessionId)
     }
-    panelLoadingState.value = Object.fromEntries(
-      Object.entries(panelLoadingState.value).filter(([sessionId]) => validIds.has(sessionId))
-    )
+    panelLoadingState.value = Object.fromEntries(Object.entries(panelLoadingState.value).filter(([sessionId]) => validIds.has(sessionId)))
   },
   { immediate: true }
 )
@@ -159,90 +194,92 @@ watch(
 
       <div class="desktop-shell">
         <aside class="desktop-sidebar">
-          <DesktopProjectSidebar :open-session-ids="openPanelIds" @open-session="openPanel" />
+          <DesktopProjectSidebar :open-session-ids="openPanelIds" @open-session="openPanel" @open-new-session="openNewSessionPanel" />
         </aside>
 
       <main class="desktop-chat-stage">
-        <div v-if="openSessions.length" class="chat-grid soft-scrollbar">
-          <template v-for="session in openSessions" :key="session.id">
-            <section v-if="panelLoadingState[session.id]" class="chat-window-placeholder">
-              <header class="chat-window-placeholder-header">
-                <div class="chat-window-copy">
-                  <strong>{{ session.title || '未命名对话' }}</strong>
-                  <span>{{ formatSessionDirectory(session.directory) }}</span>
+        <div v-if="openPanels.length" class="chat-grid soft-scrollbar">
+          <template v-for="panel in openPanels" :key="panel.id">
+            <div class="chat-grid-item">
+              <section v-if="panelLoadingState[panel.id]" class="chat-window-placeholder">
+                <header class="chat-window-placeholder-header">
+                  <div class="chat-window-copy">
+                    <strong>{{ panel.session.title || '未命名对话' }}</strong>
+                    <span>{{ formatSessionDirectory(panel.session.directory) }}</span>
+                  </div>
+
+                  <button type="button" class="chat-window-close" @click="closePanel(panel.id)">
+                    <X class="h-4 w-4" />
+                  </button>
+                </header>
+
+                <div class="chat-window-placeholder-body">
+                  <div class="placeholder-pill">
+                    <LoaderCircle class="h-4 w-4 animate-spin" />
+                    <span>正在打开对话…</span>
+                  </div>
+                  <div class="placeholder-bubble placeholder-bubble-short"></div>
+                  <div class="placeholder-bubble placeholder-bubble-long"></div>
+                  <div class="placeholder-bubble placeholder-bubble-mid placeholder-bubble-right"></div>
                 </div>
 
-                <button type="button" class="chat-window-close" @click="closePanel(session.id)">
-                  <X class="h-4 w-4" />
-                </button>
-              </header>
-
-              <div class="chat-window-placeholder-body">
-                <div class="placeholder-pill">
-                  <LoaderCircle class="h-4 w-4 animate-spin" />
-                  <span>正在打开对话…</span>
+                <div class="chat-window-placeholder-composer">
+                  <div class="placeholder-composer"></div>
                 </div>
-                <div class="placeholder-bubble placeholder-bubble-short"></div>
-                <div class="placeholder-bubble placeholder-bubble-long"></div>
-                <div class="placeholder-bubble placeholder-bubble-mid placeholder-bubble-right"></div>
-              </div>
+              </section>
 
-              <div class="chat-window-placeholder-composer">
-                <div class="placeholder-composer"></div>
-              </div>
-            </section>
+              <ChatPane
+                v-else
+                embedded
+                :title="panel.session.title || '未命名对话'"
+                :project-name="formatSessionDirectory(panel.session.directory)"
+                :messages="getWindowMessages(panel.id)"
+                :connected="app.streamReady"
+                :busy="getDesktopSessionState(panel.id)?.sessionStatus === 'busy' || getDesktopSessionState(panel.id)?.isSending"
+                :is-loading="getDesktopSessionState(panel.id)?.isLoadingSession"
+                :last-error="getDesktopSessionState(panel.id)?.lastError || ''"
+                :has-truncated-messages="getDesktopSessionState(panel.id)?.hasMoreHistory"
+                :history-limit="getDesktopSessionState(panel.id)?.historyMessageLimit || 0"
+                :working-info="getPanelWorkingInfo(panel.id)"
+                empty-text="暂无消息"
+              >
+                <template #trailing>
+                  <WorktreeSessionBanner
+                    v-if="getPanelWorktreeInfo(panel.id)"
+                    :session-id="panel.id"
+                    :project-name="getPanelWorktreeInfo(panel.id)?.projectName || ''"
+                    :root-directory="getPanelWorktreeInfo(panel.id)?.rootDirectory || ''"
+                    :worktree-directory="getPanelWorktreeInfo(panel.id)?.worktreeDirectory || ''"
+                    :root-branch="getPanelWorktreeInfo(panel.id)?.rootBranch || ''"
+                    :root-branch-loading="getPanelWorktreeInfo(panel.id)?.rootBranchLoading"
+                    :root-branch-error="getPanelWorktreeInfo(panel.id)?.rootBranchError || ''"
+                    :branch="getPanelWorktreeInfo(panel.id)?.branch || ''"
+                    :branch-loading="getPanelWorktreeInfo(panel.id)?.branchLoading"
+                    :branch-error="getPanelWorktreeInfo(panel.id)?.branchError || ''"
+                    @removed="closePanel(panel.id)"
+                  />
+                  <button type="button" class="chat-window-close" @click="closePanel(panel.id)">
+                    <X class="h-4 w-4" />
+                  </button>
+                </template>
 
-            <ChatPane
-              v-else
-              embedded
-              :title="session.title || '未命名对话'"
-              :project-name="formatSessionDirectory(session.directory)"
-              :messages="getWindowMessages(session.id)"
-              :connected="app.streamReady"
-              :busy="getDesktopSessionState(session.id)?.sessionStatus === 'busy' || getDesktopSessionState(session.id)?.isSending"
-              :is-loading="getDesktopSessionState(session.id)?.isLoadingSession"
-              :last-error="getDesktopSessionState(session.id)?.lastError || ''"
-              :has-truncated-messages="getDesktopSessionState(session.id)?.hasMoreHistory"
-              :history-limit="getDesktopSessionState(session.id)?.historyMessageLimit || 0"
-              :working-info="getPanelWorkingInfo(session.id)"
-              empty-text="暂无消息"
-            >
-              <template #trailing>
-                <WorktreeSessionBanner
-                  v-if="getPanelWorktreeInfo(session.id)"
-                  :session-id="session.id"
-                  :project-name="getPanelWorktreeInfo(session.id)?.projectName || ''"
-                  :root-directory="getPanelWorktreeInfo(session.id)?.rootDirectory || ''"
-                  :worktree-directory="getPanelWorktreeInfo(session.id)?.worktreeDirectory || ''"
-                  :root-branch="getPanelWorktreeInfo(session.id)?.rootBranch || ''"
-                  :root-branch-loading="getPanelWorktreeInfo(session.id)?.rootBranchLoading"
-                  :root-branch-error="getPanelWorktreeInfo(session.id)?.rootBranchError || ''"
-                  :branch="getPanelWorktreeInfo(session.id)?.branch || ''"
-                  :branch-loading="getPanelWorktreeInfo(session.id)?.branchLoading"
-                  :branch-error="getPanelWorktreeInfo(session.id)?.branchError || ''"
-                  @removed="closePanel(session.id)"
-                />
-                <button type="button" class="chat-window-close" @click="closePanel(session.id)">
-                  <X class="h-4 w-4" />
-                </button>
-              </template>
+                <template #history-action>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    :disabled="getDesktopSessionState(panel.id)?.isLoadingOlderMessages || !getDesktopSessionState(panel.id)?.hasMoreHistory"
+                    @click="loadOlderForPanel(panel.id)"
+                  >
+                    <LoaderCircle v-if="getDesktopSessionState(panel.id)?.isLoadingOlderMessages" class="h-3.5 w-3.5 animate-spin" />
+                    <template v-else>加载更早</template>
+                  </Button>
+                </template>
 
-              <template #history-action>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  :disabled="getDesktopSessionState(session.id)?.isLoadingOlderMessages || !getDesktopSessionState(session.id)?.hasMoreHistory"
-                  @click="loadOlderForPanel(session.id)"
-                >
-                  <LoaderCircle v-if="getDesktopSessionState(session.id)?.isLoadingOlderMessages" class="h-3.5 w-3.5 animate-spin" />
-                  <template v-else>加载更早</template>
-                </Button>
-              </template>
-
-              <template #composer>
-                <ChatComposer embedded :session-id="session.id" />
-              </template>
-            </ChatPane>
+                <template #composer>
+                  <ChatComposer embedded :session-id="panel.id" />
+                </template>
+              </ChatPane>
+            </div>
           </template>
         </div>
 
@@ -284,10 +321,11 @@ watch(
 }
 
 .desktop-shell {
+  --desktop-panel-height: calc(100dvh - 1.2rem);
   display: grid;
   grid-template-columns: clamp(20.5rem, 23vw, 23rem) minmax(0, 1fr);
   gap: 0.85rem;
-  height: calc(100vh - 1.2rem);
+  height: var(--desktop-panel-height);
 }
 
 .desktop-sidebar {
@@ -302,13 +340,31 @@ watch(
   min-height: 0;
 }
 
-.desktop-chat-stage :deep(.chat-layout-embedded) {
+.chat-grid-item {
+  display: flex;
+  min-height: var(--desktop-panel-height);
+  height: var(--desktop-panel-height);
+  min-width: 0;
+  align-self: start;
+}
+
+.chat-grid-item > * {
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
+}
+
+.chat-grid-item :deep(.chat-layout-embedded) {
   height: 100%;
+  width: 100%;
+  min-width: 0;
 }
 
 .chat-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-content: start;
+  align-items: start;
   gap: 1rem;
   height: 100%;
   overflow-y: auto;
