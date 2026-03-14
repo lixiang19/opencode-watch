@@ -196,6 +196,8 @@ watch(showAgentWorking, (value, previousValue) => {
         </div>
       </header>
 
+      <slot name="session-meta" />
+
       <div v-if="showAgentWorking" class="chat-working-banner" :class="workingBannerClass">
         <div class="chat-working-banner-icon">
           <LoaderCircle class="h-3.5 w-3.5" :class="{ 'animate-spin': !workingNeedsAttention }" />

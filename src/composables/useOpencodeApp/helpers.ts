@@ -30,6 +30,34 @@ export function formatPathTail(input?: string | null, depth = 4) {
   return `.../${parts.slice(-depth).join('/')}`
 }
 
+export function getProjectIdentityKey(projectId?: string | null, directory?: string | null) {
+  const normalizedProjectId = projectId?.trim() || ''
+  if (normalizedProjectId) {
+    return `project:${normalizedProjectId}`
+  }
+
+  const normalizedDirectory = normalizeDirectory(directory)
+  return normalizedDirectory ? `directory:${normalizedDirectory}` : ''
+}
+
+export function buildWorktreeSessionName(now = new Date()) {
+  const stamp = [
+    now.getFullYear(),
+    String(now.getMonth() + 1).padStart(2, '0'),
+    String(now.getDate()).padStart(2, '0'),
+    '-',
+    String(now.getHours()).padStart(2, '0'),
+    String(now.getMinutes()).padStart(2, '0'),
+    String(now.getSeconds()).padStart(2, '0')
+  ].join('')
+  const randomSuffix = Math.random().toString(36).slice(2, 6)
+  return `chat-${stamp}-${randomSuffix}`
+}
+
+export function quoteShellPath(input: string) {
+  return `"${input.replace(/"/g, '\\"')}"`
+}
+
 export function makeModelKey(providerId: string, modelId: string) {
   return `${providerId}/${modelId}`
 }

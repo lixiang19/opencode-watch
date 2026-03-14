@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { ChevronRight, FolderOpenDot, LoaderCircle, MessageCirclePlus } from 'lucide-vue-next'
+import { ChevronRight, FolderOpenDot, GitBranchPlus, LoaderCircle, MessageCirclePlus } from 'lucide-vue-next'
 
 import Badge from '@/components/ui/badge/Badge.vue'
 import Button from '@/components/ui/button/Button.vue'
+import WorktreeCreateDialog from '@/components/chat/WorktreeCreateDialog.vue'
 import { PROJECT_SESSION_PAGE_SIZE } from '@/composables/useOpencodeApp/constants'
-import { normalizeDirectory } from '@/composables/useOpencodeApp/helpers'
+import { getDirectoryName, getProjectIdentityKey, normalizeDirectory } from '@/composables/useOpencodeApp/helpers'
 import { getSessionWorkingInfo } from '@/composables/useOpencodeApp/messages'
 import { formatRelativeTime } from '@/lib/format'
 import { useOpencodeStore } from '@/stores/opencode'
@@ -50,47 +51,70 @@ const expandedProjectKeys = ref<string[]>([])
 const projectLoadState = ref<Record<string, boolean>>({})
 const projectLoadError = ref<Record<string, string>>({})
 const projectLoadExhausted = ref<Record<string, boolean>>({})
+const worktreeDialogOpen = ref(false)
+const worktreeDialogDirectory = ref('')
+const worktreeDialogProjectName = ref('')
+const worktreeDialogError = ref('')
+const isCreatingWorktree = ref(false)
 
 const activeSessionIds = computed(() => new Set(props.openSessionIds))
 
 const projectGroups = computed<ProjectSessionGroup[]>(() => {
-  const sessionsByDirectory = new Map<string, SessionRecord[]>()
+  const groups = new Map<string, ProjectSessionGroup>()
   const unboundSessions: SessionRecord[] = []
 
+  for (const project of app.projects) {
+    const key = getProjectIdentityKey(project.projectId, project.directory)
+    groups.set(key, {
+      key,
+      name: project.name,
+      directory: normalizeDirectory(project.directory),
+      icon: project.icon,
+      lastUpdated: project.lastUpdated,
+      sessionCount: project.sessionCount,
+      sessions: [],
+      manual: project.manual
+    })
+  }
+
   for (const session of app.sessions) {
-    const directory = normalizeDirectory(session.directory)
-    if (!directory) {
+    const sessionDirectory = normalizeDirectory(session.directory)
+    if (!sessionDirectory) {
       unboundSessions.push(session)
       continue
     }
 
-    const collection = sessionsByDirectory.get(directory)
-    if (collection) {
-      collection.push(session)
+    const rootDirectory = normalizeDirectory(
+      session.project?.worktree ||
+        app.projects.find((project) => project.projectId === (session.projectId || session.project?.id || ''))?.directory ||
+        sessionDirectory
+    )
+    const key = getProjectIdentityKey(session.projectId || session.project?.id || '', rootDirectory || sessionDirectory)
+    const existing = groups.get(key)
+    const updatedAt = session.time.updated || session.time.created || 0
+
+    if (existing) {
+      existing.sessions.push(session)
+      existing.lastUpdated = Math.max(existing.lastUpdated, updatedAt)
+      existing.sessionCount = Math.max(existing.sessionCount, existing.sessions.length)
+      existing.icon = existing.icon || session.project?.icon
     } else {
-      sessionsByDirectory.set(directory, [session])
+      groups.set(key, {
+        key,
+        name: session.project?.name || getDirectoryName(rootDirectory || sessionDirectory),
+        directory: rootDirectory || sessionDirectory,
+        icon: session.project?.icon,
+        lastUpdated: updatedAt,
+        sessionCount: 1,
+        sessions: [session]
+      })
     }
   }
 
-  const groups: ProjectSessionGroup[] = app.projects.map((project) => {
-    const directory = normalizeDirectory(project.directory)
-    const sessions = sessionsByDirectory.get(directory) ?? []
-    const lastSessionTime = sessions[0]?.time.updated ?? sessions[0]?.time.created ?? 0
-
-    return {
-      key: directory || `project:${project.projectId || project.name}`,
-      name: project.name,
-      directory,
-      icon: project.icon,
-      lastUpdated: Math.max(project.lastUpdated, lastSessionTime),
-      sessionCount: Math.max(project.sessionCount, sessions.length),
-      sessions,
-      manual: project.manual
-    }
-  })
+  const orderedGroups = Array.from(groups.values()).sort((left, right) => right.lastUpdated - left.lastUpdated)
 
   if (unboundSessions.length) {
-    groups.push({
+    orderedGroups.push({
       key: '__unbound__',
       name: '未绑定项目',
       directory: '',
@@ -101,7 +125,7 @@ const projectGroups = computed<ProjectSessionGroup[]>(() => {
     })
   }
 
-  return groups
+  return orderedGroups
 })
 
 function syncExpandedProjects() {
@@ -185,6 +209,46 @@ async function createSessionForProject(group: ProjectSessionGroup) {
   }
 
   emit('open-session', sessionId)
+}
+
+function openWorktreeDialog(group: ProjectSessionGroup) {
+  if (!group.directory) {
+    return
+  }
+
+  worktreeDialogDirectory.value = group.directory
+  worktreeDialogProjectName.value = group.name
+  worktreeDialogError.value = ''
+  worktreeDialogOpen.value = true
+}
+
+async function createWorktreeSessionForProject(worktreeName: string) {
+  const directory = worktreeDialogDirectory.value.trim()
+  if (!directory) {
+    return
+  }
+
+  isCreatingWorktree.value = true
+  worktreeDialogError.value = ''
+  app.draftDirectory = directory
+  const sessionId = await app.createDesktopWorktreeSession(directory, worktreeName)
+  isCreatingWorktree.value = false
+  if (!sessionId) {
+    worktreeDialogError.value = app.lastError || '创建 Worktree 对话失败。'
+    return
+  }
+
+  worktreeDialogOpen.value = false
+  emit('open-session', sessionId)
+}
+
+async function createWorktreeSessionForGroup(group: ProjectSessionGroup) {
+  if (!group.directory) {
+    return
+  }
+
+  app.draftDirectory = group.directory
+  openWorktreeDialog(group)
 }
 
 async function loadMoreForProject(group: ProjectSessionGroup) {
@@ -283,16 +347,28 @@ function getSessionPreviewState(session: SessionRecord) {
             <ChevronRight class="project-chevron" :class="{ 'project-chevron-expanded': isExpanded(group.key) }" />
           </button>
 
-          <Button
-            v-if="!group.unbound"
-            variant="ghost"
-            size="sm"
-            class="project-create-btn"
-            :disabled="!app.streamReady"
-            @click.stop="createSessionForProject(group)"
-          >
-            <MessageCirclePlus class="h-4 w-4" />
-          </Button>
+          <div v-if="!group.unbound" class="project-create-actions">
+            <Button
+              variant="ghost"
+              size="sm"
+              class="project-create-btn"
+              :disabled="!app.streamReady"
+              title="新建普通对话"
+              @click.stop="createSessionForProject(group)"
+            >
+              <MessageCirclePlus class="h-4 w-4" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              class="project-create-btn project-create-btn-worktree"
+              :disabled="!app.streamReady"
+              title="新建 Worktree 对话"
+              @click.stop="createWorktreeSessionForGroup(group)"
+            >
+              <GitBranchPlus class="h-4 w-4" />
+            </Button>
+          </div>
         </div>
 
         <div v-if="isExpanded(group.key)" class="session-list">
@@ -342,10 +418,16 @@ function getSessionPreviewState(session: SessionRecord) {
 
           <div v-if="!group.sessions.length" class="empty-project-state">
             <span>还没有历史对话</span>
-            <Button variant="outline" size="sm" :disabled="!app.streamReady || group.unbound" @click="createSessionForProject(group)">
-              <MessageCirclePlus class="h-4 w-4" />
-              新建对话
-            </Button>
+            <div class="empty-project-actions">
+              <Button variant="outline" size="sm" :disabled="!app.streamReady || group.unbound" @click="createSessionForProject(group)">
+                <MessageCirclePlus class="h-4 w-4" />
+                新建对话
+              </Button>
+              <Button variant="outline" size="sm" :disabled="!app.streamReady || group.unbound" @click="createWorktreeSessionForGroup(group)">
+                <GitBranchPlus class="h-4 w-4" />
+                Worktree 对话
+              </Button>
+            </div>
           </div>
 
           <div v-if="!group.unbound" class="project-session-actions">
@@ -377,6 +459,15 @@ function getSessionPreviewState(session: SessionRecord) {
       <strong>还没有项目</strong>
       <p>先在手机端项目页选择目录，或等已有会话同步后，这里会按项目归档显示。</p>
     </div>
+
+    <WorktreeCreateDialog
+      v-model:open="worktreeDialogOpen"
+      :busy="isCreatingWorktree"
+      :project-name="worktreeDialogProjectName"
+      :directory="worktreeDialogDirectory"
+      :error="worktreeDialogError"
+      @confirm="createWorktreeSessionForProject"
+    />
   </div>
 </template>
 
@@ -574,6 +665,16 @@ function getSessionPreviewState(session: SessionRecord) {
   color: var(--muted-foreground);
 }
 
+.project-create-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+}
+
+.project-create-btn-worktree {
+  color: color-mix(in srgb, var(--primary) 72%, var(--foreground));
+}
+
 .session-list {
   display: grid;
   gap: 0.35rem;
@@ -662,6 +763,13 @@ function getSessionPreviewState(session: SessionRecord) {
   border-radius: 1rem;
   color: var(--muted-foreground);
   font-size: 0.8rem;
+}
+
+.empty-project-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
 }
 
 .project-session-actions {

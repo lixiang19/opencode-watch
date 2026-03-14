@@ -28,6 +28,19 @@ export interface SessionRecord {
   time: SessionTimeMeta
 }
 
+export interface SessionWorktreeInfo {
+  sessionId: string
+  projectName: string
+  rootDirectory: string
+  worktreeDirectory: string
+  rootBranch: string
+  rootBranchLoading: boolean
+  rootBranchError: string
+  branch: string
+  branchLoading: boolean
+  branchError: string
+}
+
 export interface ProjectRecord {
   projectId?: string
   directory: string

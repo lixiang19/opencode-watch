@@ -27,6 +27,7 @@ import {
 } from '@/composables/useOpencodeApp/constants'
 import {
   buildAuthHeader,
+  getProjectIdentityKey,
   getDirectoryName,
   isUnauthorizedError,
   makeModelKey,
@@ -59,7 +60,8 @@ import type {
   ComposerMode,
   ProjectIconRecord,
   ProjectRecord,
-  SessionRecord
+  SessionRecord,
+  SessionWorktreeInfo
 } from '@/types/opencode'
 
 import type {
@@ -113,6 +115,10 @@ export function useOpencodeApp() {
   let closeStream: (() => void) | null = null
   const chatOptionsCache = new Map<string, ChatOptionsSnapshot>()
   const chatOptionsRequests = new Map<string, Promise<ChatOptionsSnapshot>>()
+  const worktreeBranchState = ref<Record<string, { branch: string; loading: boolean; error: string }>>({})
+  const worktreeBranchRequests = new Map<string, Promise<string>>()
+  const ptyExitCodes = new Map<string, number>()
+  const ptyExitWaiters = new Map<string, { resolve: (code: number) => void; reject: (error: Error) => void; timer: number }>()
 
   const hasAuthCredentials = computed(() => Boolean(username.value.trim()) && Boolean(password.value.trim()))
   const authGateVisible = computed(() => !authValidated.value)
@@ -154,9 +160,10 @@ export function useOpencodeApp() {
   const projects = computed<ProjectRecord[]>(() => {
     const cutoff = Date.now() - RECENT_PROJECT_WINDOW
     const groups = new Map<string, ProjectRecord>()
+    const projectLookup = new Map(projectCatalog.value.map((project) => [project.projectId, project] as const))
 
     for (const project of projectCatalog.value) {
-      groups.set(project.directory, {
+      groups.set(getProjectIdentityKey(project.projectId, project.directory), {
         projectId: project.projectId,
         directory: project.directory,
         name: project.name,
@@ -173,7 +180,9 @@ export function useOpencodeApp() {
         continue
       }
 
-      const existing = groups.get(directory)
+      const projectId = session.projectId || session.project?.id || ''
+      const rootDirectory = normalizeDirectory(session.project?.worktree || projectLookup.get(projectId)?.directory || directory)
+      const existing = groups.get(getProjectIdentityKey(projectId, rootDirectory || directory))
       const updated = session.time?.updated ?? session.time?.created ?? 0
       if (existing) {
         existing.projectId = existing.projectId || session.projectId || session.project?.id
@@ -184,10 +193,10 @@ export function useOpencodeApp() {
           existing.source = 'session'
         }
       } else {
-        groups.set(directory, {
+        groups.set(getProjectIdentityKey(projectId, rootDirectory || directory), {
           projectId: session.projectId || session.project?.id,
-          directory,
-          name: session.project?.name || getDirectoryName(directory),
+          directory: rootDirectory || directory,
+          name: session.project?.name || getDirectoryName(rootDirectory || directory),
           icon: session.project?.icon,
           lastUpdated: updated,
           sessionCount: 1,
@@ -197,8 +206,13 @@ export function useOpencodeApp() {
     }
 
     const manualDirectory = normalizeDirectory(draftDirectory.value)
-    if (manualDirectory && !groups.has(manualDirectory)) {
-      groups.set(manualDirectory, {
+    const manualKey = getProjectIdentityKey('', manualDirectory)
+    const hasSameDirectory = manualDirectory
+      ? Array.from(groups.values()).some((project) => normalizeDirectory(project.directory) === manualDirectory)
+      : false
+
+    if (manualDirectory && !groups.has(manualKey) && !hasSameDirectory) {
+      groups.set(manualKey, {
         directory: manualDirectory,
         name: getDirectoryName(manualDirectory),
         lastUpdated: Date.now(),
@@ -223,6 +237,245 @@ export function useOpencodeApp() {
 
   const chatOptionDirectory = computed(() => sessionDirectory.value || normalizeDirectory(draftDirectory.value))
   const canCreateSession = computed(() => Boolean(normalizeDirectory(draftDirectory.value)) && streamReady.value)
+
+  function cacheWorktreeBranch(directory: string, branch: string) {
+    const normalizedDirectory = normalizeDirectory(directory)
+    if (!normalizedDirectory) {
+      return
+    }
+
+    worktreeBranchState.value = {
+      ...worktreeBranchState.value,
+      [normalizedDirectory]: {
+        branch: branch.trim(),
+        loading: false,
+        error: ''
+      }
+    }
+  }
+
+  function resolveSessionRootDirectory(session?: SessionRecord | null) {
+    if (!session) {
+      return ''
+    }
+
+    const projectId = session.projectId || session.project?.id || ''
+    const projectMatch = projectId ? projectCatalog.value.find((item) => item.projectId === projectId) : null
+    return normalizeDirectory(session.project?.worktree || projectMatch?.directory || session.directory)
+  }
+
+  async function ensureWorktreeBranch(directory?: string | null) {
+    const normalizedDirectory = normalizeDirectory(directory)
+    if (!normalizedDirectory) {
+      return ''
+    }
+
+    const cached = worktreeBranchState.value[normalizedDirectory]
+    if (cached?.branch) {
+      return cached.branch
+    }
+
+    const pending = worktreeBranchRequests.get(normalizedDirectory)
+    if (pending) {
+      return pending
+    }
+
+    worktreeBranchState.value = {
+      ...worktreeBranchState.value,
+      [normalizedDirectory]: {
+        branch: cached?.branch || '',
+        loading: true,
+        error: ''
+      }
+    }
+
+    const request = getClient(normalizedDirectory)
+      .vcs.get({ directory: normalizedDirectory })
+      .then(({ data }) => {
+        const branch = data?.branch?.trim() || ''
+        worktreeBranchState.value = {
+          ...worktreeBranchState.value,
+          [normalizedDirectory]: {
+            branch,
+            loading: false,
+            error: branch ? '' : '当前 worktree 没有可用分支信息。'
+          }
+        }
+        return branch
+      })
+      .catch((error) => {
+        const message = parseError(error)
+        worktreeBranchState.value = {
+          ...worktreeBranchState.value,
+          [normalizedDirectory]: {
+            branch: '',
+            loading: false,
+            error: message
+          }
+        }
+        throw error
+      })
+      .finally(() => {
+        worktreeBranchRequests.delete(normalizedDirectory)
+      })
+
+    worktreeBranchRequests.set(normalizedDirectory, request)
+    return request
+  }
+
+  function getSessionWorktreeInfo(sessionId: string): SessionWorktreeInfo | null {
+    const session = sessions.value.find((item) => item.id === sessionId) ?? null
+    const worktreeDirectory = normalizeDirectory(session?.directory)
+    const rootDirectory = resolveSessionRootDirectory(session)
+    if (!session || !worktreeDirectory || !rootDirectory || worktreeDirectory === rootDirectory) {
+      return null
+    }
+
+    const branchState = worktreeBranchState.value[worktreeDirectory]
+    const rootBranchState = worktreeBranchState.value[rootDirectory]
+    return {
+      sessionId,
+      projectName: session.project?.name || getDirectoryName(rootDirectory),
+      rootDirectory,
+      worktreeDirectory,
+      rootBranch: rootBranchState?.branch || '',
+      rootBranchLoading: rootBranchState?.loading ?? false,
+      rootBranchError: rootBranchState?.error || '',
+      branch: branchState?.branch || '',
+      branchLoading: branchState?.loading ?? false,
+      branchError: branchState?.error || ''
+    }
+  }
+
+  async function ensureSessionWorktreeInfo(sessionId: string) {
+    const info = getSessionWorktreeInfo(sessionId)
+    if (!info) {
+      return null
+    }
+
+    if (!info.branch && !info.branchLoading) {
+      try {
+        await ensureWorktreeBranch(info.worktreeDirectory)
+      } catch {
+        return getSessionWorktreeInfo(sessionId)
+      }
+    }
+
+    if (!info.rootBranch && !info.rootBranchLoading) {
+      try {
+        await ensureWorktreeBranch(info.rootDirectory)
+      } catch {
+        return getSessionWorktreeInfo(sessionId)
+      }
+    }
+
+    return getSessionWorktreeInfo(sessionId)
+  }
+
+  function waitForPtyExit(ptyID: string, timeoutMs = 120000) {
+    const cachedExitCode = ptyExitCodes.get(ptyID)
+    if (typeof cachedExitCode === 'number') {
+      ptyExitCodes.delete(ptyID)
+      return Promise.resolve(cachedExitCode)
+    }
+
+    return new Promise<number>((resolve, reject) => {
+      const timer = window.setTimeout(() => {
+        ptyExitWaiters.delete(ptyID)
+        reject(new Error('等待 Git 命令执行结果超时，请在终端手动确认。'))
+      }, timeoutMs)
+
+      ptyExitWaiters.set(ptyID, {
+        resolve: (code) => {
+          window.clearTimeout(timer)
+          ptyExitWaiters.delete(ptyID)
+          ptyExitCodes.delete(ptyID)
+          resolve(code)
+        },
+        reject: (error) => {
+          window.clearTimeout(timer)
+          ptyExitWaiters.delete(ptyID)
+          reject(error)
+        },
+        timer
+      })
+    })
+  }
+
+  async function runGitCommandInProject(projectDirectory: string, args: string[], title: string) {
+    const normalizedDirectory = normalizeDirectory(projectDirectory)
+    if (!normalizedDirectory) {
+      throw new Error('缺少项目目录，无法执行 Git 命令。')
+    }
+
+    const currentClient = getClient(normalizedDirectory)
+    const { data: pty } = await currentClient.pty.create({
+      directory: normalizedDirectory,
+      cwd: normalizedDirectory,
+      command: 'git',
+      args,
+      title
+    })
+
+    if (!pty?.id) {
+      throw new Error('Git 命令启动失败。')
+    }
+
+    const exitCode = await waitForPtyExit(pty.id)
+    void currentClient.pty.remove({ ptyID: pty.id, directory: normalizedDirectory }).catch(() => undefined)
+
+    if (exitCode !== 0) {
+      throw new Error(`Git 命令执行失败（退出码 ${exitCode}）。如果有冲突，请到主仓库终端手动处理。`)
+    }
+  }
+
+  async function mergeWorktreeSession(sessionId: string) {
+    const info = await ensureSessionWorktreeInfo(sessionId)
+    if (!info) {
+      throw new Error('当前对话不是 Worktree 对话。')
+    }
+
+    if (!info.branch) {
+      throw new Error('暂时拿不到 Worktree 分支名，请稍后重试。')
+    }
+
+    await runGitCommandInProject(info.rootDirectory, ['merge', info.branch], `Merge ${info.branch}`)
+    await ensureWorktreeBranch(info.rootDirectory).catch(() => '')
+    return getSessionWorktreeInfo(sessionId)
+  }
+
+  async function removeWorktreeSession(sessionId: string) {
+    const info = await ensureSessionWorktreeInfo(sessionId)
+    if (!info) {
+      throw new Error('当前对话不是 Worktree 对话。')
+    }
+
+    const currentClient = getClient(info.rootDirectory)
+    await currentClient.worktree.remove({
+      directory: info.rootDirectory,
+      worktreeRemoveInput: {
+        directory: info.worktreeDirectory
+      }
+    })
+
+    try {
+      await currentClient.session.update({
+        sessionID: sessionId,
+        directory: info.worktreeDirectory,
+        time: {
+          archived: Date.now()
+        }
+      })
+    } catch (error) {
+      console.warn('[opencode:worktree] worktree removed but session archive failed', error)
+    }
+
+    const nextBranchState = { ...worktreeBranchState.value }
+    delete nextBranchState[info.worktreeDirectory]
+    worktreeBranchState.value = nextBranchState
+    await refreshSessions({ reopen: false })
+    return true
+  }
 
   const pwaManager = createPwaManager({
     activeSession,
@@ -287,6 +540,7 @@ export function useOpencodeApp() {
     sessionPreviewMessages,
     sessionStatus,
     armCompletionNotice,
+    cacheWorktreeBranch,
     clearPendingCompletionNotice,
     ensureChatOptionsSnapshot,
     ensureDesktopSessionState,
@@ -302,7 +556,9 @@ export function useOpencodeApp() {
   const {
     closeDesktopSession,
     createDesktopSession,
+    createDesktopWorktreeSession,
     createSession,
+    createWorktreeSession,
     loadOlderDesktopMessages,
     loadOlderMessages,
     loadSessionPreview,
@@ -325,6 +581,14 @@ export function useOpencodeApp() {
     clientCache.clear()
     chatOptionsCache.clear()
     chatOptionsRequests.clear()
+    worktreeBranchRequests.clear()
+    worktreeBranchState.value = {}
+    for (const { reject, timer } of ptyExitWaiters.values()) {
+      window.clearTimeout(timer)
+      reject(new Error('连接已断开，Git 命令结果已取消。'))
+    }
+    ptyExitWaiters.clear()
+    ptyExitCodes.clear()
     availableAgents.value = []
     availableCommands.value = []
     availableModels.value = []
@@ -786,7 +1050,7 @@ export function useOpencodeApp() {
             sessionId: getEventSessionId(typedEvent),
             properties: typedEvent.properties
           })
-          handleEvent(typedEvent)
+          handleEvent(typedEvent, typedGlobalEvent.directory)
         }
       } catch (error) {
         console.error('[opencode:sse] stream error', error)
@@ -911,7 +1175,7 @@ export function useOpencodeApp() {
   }
 
 
-  function handleEvent(event: OpencodeEvent) {
+  function handleEvent(event: OpencodeEvent, eventDirectory?: string) {
     const eventSessionId = getEventSessionId(event)
 
     if (event.type === 'session.created') {
@@ -932,6 +1196,25 @@ export function useOpencodeApp() {
         nextProject,
         ...projectCatalog.value.filter((item) => item.projectId !== nextProject.projectId)
       ]
+    }
+
+    if (event.type === 'vcs.branch.updated' && eventDirectory) {
+      cacheWorktreeBranch(eventDirectory, (event.properties as { branch?: string }).branch || '')
+    }
+
+    if (event.type === 'pty.exited') {
+      const { id, exitCode } = event.properties as { id: string; exitCode: number }
+      const waiter = ptyExitWaiters.get(id)
+      if (waiter) {
+        waiter.resolve(exitCode)
+      } else {
+        ptyExitCodes.set(id, exitCode)
+      }
+    }
+
+    if (event.type === 'pty.deleted') {
+      const { id } = event.properties as { id: string }
+      ptyExitCodes.delete(id)
     }
 
     if (event.type === 'session.error') {
@@ -1100,6 +1383,8 @@ export function useOpencodeApp() {
     authValidated,
     connectionStateLabel,
     canCreateSession,
+    ensureSessionWorktreeInfo,
+    getSessionWorktreeInfo,
     historyMessageLimit,
     hiddenMessageCount,
     hasMoreHistory,
@@ -1109,11 +1394,15 @@ export function useOpencodeApp() {
     connect,
     refreshSessions,
     loadMoreProjectSessions,
+    mergeWorktreeSession,
     openSession,
     openDesktopSession,
     createSession,
+    createWorktreeSession,
     createDesktopSession,
+    createDesktopWorktreeSession,
     closeDesktopSession,
+    removeWorktreeSession,
     stopCurrentSession,
     stopDesktopSession,
     sendPromptToSession,

@@ -6,6 +6,7 @@ import { useRoute, useRouter } from 'vue-router'
 import Button from '@/components/ui/button/Button.vue'
 import ChatComposer from '@/components/chat/ChatComposer.vue'
 import ChatPane from '@/components/chat/ChatPane.vue'
+import WorktreeSessionBanner from '@/components/chat/WorktreeSessionBanner.vue'
 import { getSessionWorkingInfo } from '@/composables/useOpencodeApp/messages'
 import { useOpencodeStore } from '@/stores/opencode'
 
@@ -14,6 +15,7 @@ const router = useRouter()
 const app = useOpencodeStore()
 
 const workingInfo = computed(() => getSessionWorkingInfo(app.messages, app.sessionStatus))
+const activeWorktreeInfo = computed(() => app.getSessionWorktreeInfo(app.selectedSessionId))
 
 async function syncSession(sessionId?: string | string[]) {
   const id = Array.isArray(sessionId) ? sessionId[0] : sessionId
@@ -43,6 +45,18 @@ watch(
   },
   { immediate: true }
 )
+
+watch(
+  () => app.selectedSessionId,
+  (sessionId) => {
+    if (!sessionId) {
+      return
+    }
+
+    void app.ensureSessionWorktreeInfo(sessionId)
+  },
+  { immediate: true }
+)
 </script>
 
 <template>
@@ -59,6 +73,22 @@ watch(
     :loading-older="app.isLoadingOlderMessages"
     :working-info="workingInfo"
   >
+    <template v-if="activeWorktreeInfo" #session-meta>
+      <WorktreeSessionBanner
+        :session-id="activeWorktreeInfo.sessionId"
+        :project-name="activeWorktreeInfo.projectName"
+        :root-directory="activeWorktreeInfo.rootDirectory"
+        :worktree-directory="activeWorktreeInfo.worktreeDirectory"
+        :root-branch="activeWorktreeInfo.rootBranch"
+        :root-branch-loading="activeWorktreeInfo.rootBranchLoading"
+        :root-branch-error="activeWorktreeInfo.rootBranchError"
+        :branch="activeWorktreeInfo.branch"
+        :branch-loading="activeWorktreeInfo.branchLoading"
+        :branch-error="activeWorktreeInfo.branchError"
+        @removed="goBack"
+      />
+    </template>
+
     <template #leading>
       <button class="btn-back" type="button" @click="goBack">
         <ArrowLeft class="h-4 w-4" />

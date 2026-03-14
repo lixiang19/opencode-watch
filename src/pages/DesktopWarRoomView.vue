@@ -5,6 +5,7 @@ import { FolderSync, LoaderCircle, Sparkles, X } from 'lucide-vue-next'
 import Button from '@/components/ui/button/Button.vue'
 import ChatComposer from '@/components/chat/ChatComposer.vue'
 import ChatPane from '@/components/chat/ChatPane.vue'
+import WorktreeSessionBanner from '@/components/chat/WorktreeSessionBanner.vue'
 import DesktopProjectSidebar from '@/components/layout/DesktopProjectSidebar.vue'
 import { getSessionWorkingInfo } from '@/composables/useOpencodeApp/messages'
 import { useOpencodeStore } from '@/stores/opencode'
@@ -55,6 +56,10 @@ function getPanelWorkingInfo(sessionId: string) {
   return getSessionWorkingInfo(sessionState.messages, sessionState.sessionStatus)
 }
 
+function getPanelWorktreeInfo(sessionId: string) {
+  return app.getSessionWorktreeInfo(sessionId)
+}
+
 async function openPanel(sessionId: string) {
   if (!sessionId) {
     return
@@ -81,6 +86,7 @@ async function openPanel(sessionId: string) {
   await nextTick()
 
   const loadSession = app.openDesktopSession(sessionId)
+  void app.ensureSessionWorktreeInfo(sessionId)
 
   void loadSession.finally(async () => {
     const elapsed = Date.now() - startedAt
@@ -201,6 +207,22 @@ watch(
               :working-info="getPanelWorkingInfo(session.id)"
               empty-text="暂无消息"
             >
+              <template v-if="getPanelWorktreeInfo(session.id)" #session-meta>
+                <WorktreeSessionBanner
+                  :session-id="session.id"
+                  :project-name="getPanelWorktreeInfo(session.id)?.projectName || ''"
+                  :root-directory="getPanelWorktreeInfo(session.id)?.rootDirectory || ''"
+                  :worktree-directory="getPanelWorktreeInfo(session.id)?.worktreeDirectory || ''"
+                  :root-branch="getPanelWorktreeInfo(session.id)?.rootBranch || ''"
+                  :root-branch-loading="getPanelWorktreeInfo(session.id)?.rootBranchLoading"
+                  :root-branch-error="getPanelWorktreeInfo(session.id)?.rootBranchError || ''"
+                  :branch="getPanelWorktreeInfo(session.id)?.branch || ''"
+                  :branch-loading="getPanelWorktreeInfo(session.id)?.branchLoading"
+                  :branch-error="getPanelWorktreeInfo(session.id)?.branchError || ''"
+                  @removed="closePanel(session.id)"
+                />
+              </template>
+
               <template #trailing>
                 <button type="button" class="chat-window-close" @click="closePanel(session.id)">
                   <X class="h-4 w-4" />

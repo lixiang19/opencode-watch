@@ -3,7 +3,7 @@ import type { QuestionAnswer, QuestionRequest } from '@opencode-ai/sdk/v2/client
 
 import { getHistorySelection } from './catalog'
 import { HISTORY_LIMIT_STEP, INITIAL_HISTORY_LIMIT } from './constants'
-import { isUnauthorizedError, makeModelKey, normalizeDirectory, normalizeModelKey, parseError } from './helpers'
+import { buildWorktreeSessionName, isUnauthorizedError, makeModelKey, normalizeDirectory, normalizeModelKey, parseError } from './helpers'
 import { applyQuestionAsked, convertHistoryMessage, pruneEmptyAssistantMessages } from './messages'
 import type { MessageHistoryItem } from './types'
 import type {
@@ -43,6 +43,7 @@ export function createSessionActions(args: {
   sessionStatus: Ref<'idle' | 'busy'>
   clearPendingCompletionNotice: (sessionId?: string) => void
   armCompletionNotice: (sessionId: string, prompt: string) => void
+  cacheWorktreeBranch: (directory: string, branch: string) => void
   ensureChatOptionsSnapshot: (directory?: string) => Promise<{ agents: ChatAgentRecord[]; commands: ChatCommandRecord[]; models: ChatModelRecord[]; defaultModelKey: string }>
   ensureDesktopSessionState: (sessionId: string) => DesktopSessionState
   getClient: ClientFactory
@@ -275,6 +276,78 @@ export function createSessionActions(args: {
       }
 
       return session.id
+    } catch (error) {
+      args.handleRequestError(error)
+      return ''
+    }
+  }
+
+  async function createWorktreeSession(
+    rootDirectoryOverride?: string,
+    options: { openInSingleChat?: boolean; worktreeName?: string } = {}
+  ) {
+    const rootDirectory = normalizeDirectory(rootDirectoryOverride || args.draftDirectory.value)
+    if (!rootDirectory) {
+      args.lastError.value = '请先输入项目目录，或选择一个已有项目。'
+      return ''
+    }
+
+    args.lastError.value = ''
+    args.draftDirectory.value = rootDirectory
+
+    try {
+      const currentClient = args.getClient(rootDirectory)
+      const { data: project } = await currentClient.project.current({ directory: rootDirectory })
+      if (!project) {
+        throw new Error('未找到对应项目，无法创建 worktree 对话。')
+      }
+
+      if (project.vcs !== 'git') {
+        throw new Error('当前项目还不是 Git 仓库，无法创建 worktree 对话。')
+      }
+
+      const { data: worktree } = await currentClient.worktree.create({
+        directory: rootDirectory,
+        worktreeCreateInput: {
+          name: (options.worktreeName || '').trim() || buildWorktreeSessionName()
+        }
+      })
+
+      if (!worktree?.directory || !worktree.branch) {
+        throw new Error('创建 worktree 失败。')
+      }
+
+      const worktreeDirectory = normalizeDirectory(worktree.directory)
+      args.cacheWorktreeBranch(worktreeDirectory, worktree.branch)
+
+      try {
+        const worktreeClient = args.getClient(worktreeDirectory)
+        const { data: session } = await worktreeClient.session.create({ directory: worktreeDirectory })
+        if (!session) {
+          throw new Error('创建 worktree 对话失败。')
+        }
+
+        await args.refreshSessions({ reopen: false })
+
+        if (options.openInSingleChat !== false) {
+          await openSession(session.id)
+        }
+
+        return session.id
+      } catch (sessionError) {
+        try {
+          await currentClient.worktree.remove({
+            directory: rootDirectory,
+            worktreeRemoveInput: {
+              directory: worktreeDirectory
+            }
+          })
+        } catch (cleanupError) {
+          throw new Error(`创建 worktree 对话失败，且自动清理失败：${parseError(cleanupError)}`)
+        }
+
+        throw new Error(`创建 worktree 对话失败，已自动清理刚刚生成的 worktree：${parseError(sessionError)}`)
+      }
     } catch (error) {
       args.handleRequestError(error)
       return ''
@@ -552,6 +625,16 @@ export function createSessionActions(args: {
     return sessionId
   }
 
+  async function createDesktopWorktreeSession(directoryOverride?: string, worktreeName?: string) {
+    const sessionId = await createWorktreeSession(directoryOverride, { openInSingleChat: false, worktreeName })
+    if (!sessionId) {
+      return ''
+    }
+
+    await openDesktopSession(sessionId, { force: true })
+    return sessionId
+  }
+
   function closeDesktopSession(sessionId: string) {
     args.removeDesktopSessionState(sessionId)
   }
@@ -621,7 +704,9 @@ export function createSessionActions(args: {
   return {
     closeDesktopSession,
     createDesktopSession,
+    createDesktopWorktreeSession,
     createSession,
+    createWorktreeSession,
     fetchSessionRuntimeData,
     loadOlderDesktopMessages,
     loadOlderMessages,

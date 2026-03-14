@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { Check, Clock, FolderOpenDot, FolderSync, ImagePlus, LoaderCircle, MessageCirclePlus, PencilLine, X } from 'lucide-vue-next'
+import { Check, Clock, FolderOpenDot, FolderSync, GitBranchPlus, ImagePlus, LoaderCircle, MessageCirclePlus, PencilLine, X } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 
 import Button from '@/components/ui/button/Button.vue'
 import Card from '@/components/ui/card/Card.vue'
 import Input from '@/components/ui/input/Input.vue'
+import WorktreeCreateDialog from '@/components/chat/WorktreeCreateDialog.vue'
 import { formatRelativeTime } from '@/lib/format'
 import { useOpencodeStore } from '@/stores/opencode'
 import type { ProjectRecord } from '@/types/opencode'
@@ -38,6 +39,11 @@ const iconFileName = ref('')
 const editorError = ref('')
 const isSavingIcon = ref(false)
 const iconFileInput = ref<HTMLInputElement | null>(null)
+const worktreeDialogOpen = ref(false)
+const worktreeDialogDirectory = ref('')
+const worktreeDialogProjectName = ref('')
+const worktreeDialogError = ref('')
+const isCreatingWorktree = ref(false)
 
 function formatProjectDirectory(directory: string) {
   const normalized = directory.replace(/\\/g, '/')
@@ -187,6 +193,33 @@ async function createForProject(directory: string) {
   void router.push({ name: 'session', params: { sessionId } })
 }
 
+function openWorktreeDialog(directory: string, projectName: string) {
+  worktreeDialogDirectory.value = directory
+  worktreeDialogProjectName.value = projectName
+  worktreeDialogError.value = ''
+  worktreeDialogOpen.value = true
+}
+
+async function createWorktreeForProject(worktreeName: string) {
+  const directory = worktreeDialogDirectory.value.trim()
+  if (!directory) {
+    return
+  }
+
+  isCreatingWorktree.value = true
+  worktreeDialogError.value = ''
+  app.draftDirectory = directory
+  const sessionId = await app.createWorktreeSession(directory, { worktreeName })
+  isCreatingWorktree.value = false
+  if (!sessionId) {
+    worktreeDialogError.value = app.lastError || '创建 Worktree 对话失败。'
+    return
+  }
+
+  worktreeDialogOpen.value = false
+  void router.push({ name: 'session', params: { sessionId } })
+}
+
 function useProjectDirectory(directory: string) {
   app.draftDirectory = directory
 }
@@ -229,15 +262,27 @@ const editingPreviewIcon = computed(() => iconOverrideDraft.value || editingProj
             </div>
           </div>
           <div class="card-footer">
-            <Button 
-              block 
-              class="action-btn"
-              :disabled="!app.streamReady"
-              @click.stop="createForProject(draftProject.directory)"
-            >
-              <MessageCirclePlus class="h-4 w-4 mr-2" />
-              开启新对话
-            </Button>
+            <div class="action-group action-group-stack">
+              <Button 
+                block 
+                class="action-btn"
+                :disabled="!app.streamReady"
+                @click.stop="createForProject(draftProject.directory)"
+              >
+                <MessageCirclePlus class="h-4 w-4 mr-2" />
+                开启新对话
+              </Button>
+              <Button 
+                block 
+                variant="outline"
+                class="action-btn action-btn-secondary"
+                :disabled="!app.streamReady"
+                @click.stop="openWorktreeDialog(draftProject.directory, draftProject.name)"
+              >
+                <GitBranchPlus class="h-4 w-4 mr-2" />
+                Worktree 对话
+              </Button>
+            </div>
           </div>
         </Card>
 
@@ -283,16 +328,28 @@ const editingPreviewIcon = computed(() => iconOverrideDraft.value || editingProj
               <span class="meta-divider">•</span>
               <span class="meta-item">{{ project.sessionCount }} 个对话</span>
             </div>
-            <Button 
-              variant="outline" 
-              size="sm"
-              class="action-btn-mini"
-              :disabled="!app.streamReady"
-              @click.stop="createForProject(project.directory)"
-            >
-              <MessageCirclePlus class="h-4 w-4" />
-              新建对话
-            </Button>
+            <div class="action-group">
+              <Button 
+                variant="outline" 
+                size="sm"
+                class="action-btn-mini"
+                :disabled="!app.streamReady"
+                @click.stop="createForProject(project.directory)"
+              >
+                <MessageCirclePlus class="h-4 w-4" />
+                新建对话
+              </Button>
+              <Button 
+                variant="outline" 
+                size="sm"
+                class="action-btn-mini action-btn-mini-worktree"
+                :disabled="!app.streamReady"
+                @click.stop="openWorktreeDialog(project.directory, project.name)"
+              >
+                <GitBranchPlus class="h-4 w-4" />
+                Worktree 对话
+              </Button>
+            </div>
           </div>
         </Card>
       </div>
@@ -308,6 +365,15 @@ const editingPreviewIcon = computed(() => iconOverrideDraft.value || editingProj
           <Button @click="router.push('/settings')">前往设置配置目录</Button>
         </div>
       </div>
+
+      <WorktreeCreateDialog
+        v-model:open="worktreeDialogOpen"
+        :busy="isCreatingWorktree"
+        :project-name="worktreeDialogProjectName"
+        :directory="worktreeDialogDirectory"
+        :error="worktreeDialogError"
+        @confirm="createWorktreeForProject"
+      />
 
       <transition name="fade">
         <div v-if="editingProject" class="editor-overlay" @click.self="closeProjectIconEditor">
@@ -724,6 +790,10 @@ const editingPreviewIcon = computed(() => iconOverrideDraft.value || editingProj
   width: 100%;
 }
 
+.action-btn-secondary {
+  color: color-mix(in srgb, var(--primary) 74%, var(--foreground));
+}
+
 .action-btn-mini {
   border-radius: 0.5rem;
   height: 1.875rem;
@@ -732,6 +802,23 @@ const editingPreviewIcon = computed(() => iconOverrideDraft.value || editingProj
   gap: 0.35rem;
   flex-shrink: 0;
   white-space: nowrap;
+}
+
+.action-btn-mini-worktree {
+  color: color-mix(in srgb, var(--primary) 74%, var(--foreground));
+}
+
+.action-group {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.action-group-stack {
+  width: 100%;
+  flex-direction: column;
+  justify-content: stretch;
 }
 
 /* ─────────────────────────────────────────
