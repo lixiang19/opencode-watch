@@ -9,6 +9,7 @@ import type { MessageHistoryItem } from './types'
 import type {
   ChatAgentRecord,
   ChatCommandRecord,
+  ComposerImageAttachment,
   ChatMessageRecord,
   ChatModelRecord,
   ComposerMode,
@@ -36,23 +37,24 @@ export function createSessionActions(args: {
   selectedCommand: ComputedRef<ChatCommandRecord | null>
   selectedCommandName: Ref<string>
   selectedModel: ComputedRef<ChatModelRecord | null>
+  selectedVariant: Ref<string>
   selectedSessionId: Ref<string>
   sessionPreviewMessages: Ref<Record<string, ChatMessageRecord[]>>
   sessionStatus: Ref<'idle' | 'busy'>
   clearPendingCompletionNotice: (sessionId?: string) => void
   armCompletionNotice: (sessionId: string, prompt: string) => void
-  ensureChatOptionsSnapshot: (directory?: string) => Promise<{ agents: ChatAgentRecord[]; commands: ChatCommandRecord[]; models: ChatModelRecord[] }>
+  ensureChatOptionsSnapshot: (directory?: string) => Promise<{ agents: ChatAgentRecord[]; commands: ChatCommandRecord[]; models: ChatModelRecord[]; defaultModelKey: string }>
   ensureDesktopSessionState: (sessionId: string) => DesktopSessionState
   getClient: ClientFactory
   handleRequestError: (error: unknown) => void
   invalidateAuth: () => void
-  loadChatOptions: (options?: { directory?: string; preferredAgentId?: string; preferredModelKey?: string }) => Promise<void>
+  loadChatOptions: (options?: { directory?: string; preferredAgentId?: string; preferredModelKey?: string; preferredVariant?: string }) => Promise<void>
   refreshSessions: (options?: { reopen?: boolean }) => Promise<void>
   removeDesktopSessionState: (sessionId: string) => void
   setDesktopSessionChatOptions: (
     sessionState: DesktopSessionState,
-    snapshot: { agents: ChatAgentRecord[]; commands: ChatCommandRecord[]; models: ChatModelRecord[] },
-    options?: { preferredAgentId?: string; preferredModelKey?: string }
+    snapshot: { agents: ChatAgentRecord[]; commands: ChatCommandRecord[]; models: ChatModelRecord[]; defaultModelKey: string },
+    options?: { preferredAgentId?: string; preferredModelKey?: string; preferredVariant?: string }
   ) => void
   syncSessionPreviewFromMessages: (sessionId: string, nextMessages: ChatMessageRecord[]) => void
 }) {
@@ -62,6 +64,33 @@ export function createSessionActions(args: {
     }
 
     return normalizeDirectory(args.sessions.value.find((item) => item.id === sessionId)?.directory)
+  }
+
+  function buildPromptParts(prompt: string, images: ComposerImageAttachment[]) {
+    const trimmedPrompt = prompt.trim()
+
+    return [
+      ...images.map((image) => ({
+        type: 'file' as const,
+        mime: image.mime,
+        filename: image.filename,
+        url: image.dataUrl
+      })),
+      ...(trimmedPrompt ? [{ type: 'text' as const, text: trimmedPrompt }] : [])
+    ]
+  }
+
+  function getPromptSummary(prompt: string, imageCount: number) {
+    const trimmedPrompt = prompt.trim()
+    if (trimmedPrompt) {
+      return trimmedPrompt
+    }
+
+    if (imageCount <= 1) {
+      return '[图片]'
+    }
+
+    return `[${imageCount} 张图片]`
   }
 
   async function fetchSessionRuntimeData(sessionId: string, messageLimit: number) {
@@ -116,7 +145,8 @@ export function createSessionActions(args: {
       await args.loadChatOptions({
         directory: sessionData.normalizedDirectory,
         preferredAgentId: sessionData.historySelection.agentId,
-        preferredModelKey: sessionData.historySelection.modelKey
+        preferredModelKey: sessionData.historySelection.modelKey,
+        preferredVariant: sessionData.historySelection.variant
       })
 
       args.messages.value = sessionData.messages
@@ -186,7 +216,8 @@ export function createSessionActions(args: {
       sessionState.sessionStatus = 'idle'
       args.setDesktopSessionChatOptions(sessionState, snapshot, {
         preferredAgentId: sessionData.historySelection.agentId,
-        preferredModelKey: sessionData.historySelection.modelKey
+        preferredModelKey: sessionData.historySelection.modelKey,
+        preferredVariant: sessionData.historySelection.variant
       })
       args.syncSessionPreviewFromMessages(sessionId, sessionState.messages)
 
@@ -283,7 +314,7 @@ export function createSessionActions(args: {
     await Promise.all(targets.map((sessionId) => loadSessionPreview(sessionId, options)))
   }
 
-  async function sendCurrentMessage() {
+  async function sendCurrentMessage(images: ComposerImageAttachment[] = []) {
     const trimmedPrompt = args.composerText.value.trim()
     const selectedCommandEntry = args.selectedCommand.value
     const manualCommand = !selectedCommandEntry && trimmedPrompt.startsWith('/') ? trimmedPrompt.slice(1).trim() : ''
@@ -291,9 +322,15 @@ export function createSessionActions(args: {
     const commandName = selectedCommandEntry?.name || manualCommandName || ''
     const commandArgs = manualCommandArgs.join(' ')
     const hasCommand = Boolean(commandName)
+    const promptParts = buildPromptParts(trimmedPrompt, images)
 
-    if ((!trimmedPrompt && !hasCommand) || args.isSending.value) {
-      return
+    if ((!hasCommand && !promptParts.length) || args.isSending.value) {
+      return false
+    }
+
+    if (hasCommand && images.length > 0) {
+      args.lastError.value = '命令模式暂不支持附加图片，请切换为普通消息。'
+      return false
     }
 
     if (!args.selectedSessionId.value) {
@@ -301,7 +338,7 @@ export function createSessionActions(args: {
     }
 
     if (!args.selectedSessionId.value) {
-      return
+      return false
     }
 
     const directory = getSessionDirectory(args.selectedSessionId.value)
@@ -313,6 +350,7 @@ export function createSessionActions(args: {
         }
       : undefined
     const agent = args.selectedAgent.value?.id || undefined
+    const variant = args.selectedVariant.value || undefined
     args.isSending.value = true
     args.sessionStatus.value = 'busy'
     args.lastError.value = ''
@@ -326,7 +364,8 @@ export function createSessionActions(args: {
           command: commandName,
           arguments: commandArgs || undefined,
           agent,
-          model: model ? makeModelKey(model.providerID, model.modelID) : undefined
+          model: model ? makeModelKey(model.providerID, model.modelID) : undefined,
+          variant
         })
       } else {
         await currentClient.session.prompt({
@@ -334,26 +373,29 @@ export function createSessionActions(args: {
           directory: directory || undefined,
           agent,
           model,
-          parts: [{ type: 'text', text: trimmedPrompt }]
+          variant,
+          parts: promptParts
         })
       }
 
       args.armCompletionNotice(
         currentSessionId,
-        hasCommand ? `/${commandName}${commandArgs ? ` ${commandArgs}` : ''}` : trimmedPrompt
+        hasCommand ? `/${commandName}${commandArgs ? ` ${commandArgs}` : ''}` : getPromptSummary(trimmedPrompt, images.length)
       )
       args.composerText.value = ''
       args.selectedCommandName.value = ''
       args.composerMode.value = 'prompt'
+      return true
     } catch (error) {
       args.clearPendingCompletionNotice(args.selectedSessionId.value)
       args.handleRequestError(error)
       args.isSending.value = false
       args.sessionStatus.value = 'idle'
+      return false
     }
   }
 
-  async function sendDesktopMessage(sessionId: string, prompt: string) {
+  async function sendDesktopMessage(sessionId: string, prompt: string, images: ComposerImageAttachment[] = []) {
     const sessionState = args.desktopSessions.value[sessionId] ?? args.ensureDesktopSessionState(sessionId)
     const trimmedPrompt = prompt.trim()
     const selectedCommandEntry = sessionState.availableCommands.find((command) => command.name === sessionState.selectedCommandName) ?? null
@@ -362,8 +404,14 @@ export function createSessionActions(args: {
     const commandName = selectedCommandEntry?.name || manualCommandName || ''
     const commandArgs = selectedCommandEntry ? trimmedPrompt : manualCommandArgs.join(' ')
     const hasCommand = Boolean(commandName)
+    const promptParts = buildPromptParts(trimmedPrompt, images)
 
-    if ((!trimmedPrompt && !hasCommand) || sessionState.isSending) {
+    if ((!hasCommand && !promptParts.length) || sessionState.isSending) {
+      return false
+    }
+
+    if (hasCommand && images.length > 0) {
+      sessionState.lastError = '命令模式暂不支持附加图片，请切换为普通消息。'
       return false
     }
 
@@ -379,6 +427,7 @@ export function createSessionActions(args: {
         }
       : undefined
     const agent = sessionState.availableAgents.find((item) => item.id === sessionState.selectedAgentId)?.id || undefined
+    const variant = sessionState.selectedVariant || undefined
     const directory = getSessionDirectory(sessionId)
     const currentClient = args.getClient(directory)
 
@@ -394,7 +443,8 @@ export function createSessionActions(args: {
           command: commandName,
           arguments: commandArgs || undefined,
           agent,
-          model: model ? makeModelKey(model.providerID, model.modelID) : undefined
+          model: model ? makeModelKey(model.providerID, model.modelID) : undefined,
+          variant
         })
       } else {
         await currentClient.session.prompt({
@@ -402,11 +452,15 @@ export function createSessionActions(args: {
           directory: directory || undefined,
           agent,
           model,
-          parts: [{ type: 'text', text: trimmedPrompt }]
+          variant,
+          parts: promptParts
         })
       }
 
-      args.armCompletionNotice(sessionId, hasCommand ? `/${commandName}${commandArgs ? ` ${commandArgs}` : ''}` : trimmedPrompt)
+      args.armCompletionNotice(
+        sessionId,
+        hasCommand ? `/${commandName}${commandArgs ? ` ${commandArgs}` : ''}` : getPromptSummary(trimmedPrompt, images.length)
+      )
       sessionState.selectedCommandName = ''
       return true
     } catch (error) {
@@ -419,6 +473,55 @@ export function createSessionActions(args: {
         args.invalidateAuth()
       }
 
+      return false
+    }
+  }
+
+  async function stopCurrentSession() {
+    const sessionId = args.selectedSessionId.value
+    if (!sessionId || !args.isSending.value) {
+      return false
+    }
+
+    try {
+      const directory = getSessionDirectory(sessionId)
+      const currentClient = args.getClient(directory)
+      await currentClient.session.abort({
+        sessionID: sessionId,
+        directory: directory || undefined
+      })
+      args.clearPendingCompletionNotice(sessionId)
+      args.isSending.value = false
+      args.sessionStatus.value = 'idle'
+      return true
+    } catch (error) {
+      args.handleRequestError(error)
+      return false
+    }
+  }
+
+  async function stopDesktopSession(sessionId: string) {
+    const sessionState = args.desktopSessions.value[sessionId] ?? args.ensureDesktopSessionState(sessionId)
+    if (!sessionId || !sessionState.isSending) {
+      return false
+    }
+
+    try {
+      const directory = getSessionDirectory(sessionId)
+      const currentClient = args.getClient(directory)
+      await currentClient.session.abort({
+        sessionID: sessionId,
+        directory: directory || undefined
+      })
+      args.clearPendingCompletionNotice(sessionId)
+      sessionState.isSending = false
+      sessionState.sessionStatus = 'idle'
+      return true
+    } catch (error) {
+      sessionState.lastError = parseError(error)
+      if (isUnauthorizedError(error)) {
+        args.invalidateAuth()
+      }
       return false
     }
   }
@@ -529,6 +632,8 @@ export function createSessionActions(args: {
     rejectQuestion,
     replyPermission,
     replyQuestion,
+    stopCurrentSession,
+    stopDesktopSession,
     sendCurrentMessage,
     sendDesktopMessage,
     sendPromptToSession

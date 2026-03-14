@@ -255,18 +255,22 @@ watch(
 
 /* ── Bubbles ── */
 .msg-bubble {
-  max-width: min(82%, 32rem);
+  max-width: min(88%, 36rem);
   padding: 0.75rem 1rem;
   border-radius: 1.375rem;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .msg-bubble-user {
+  max-width: min(84%, 34rem);
   background: var(--primary);
   color: var(--primary-foreground);
   border-bottom-right-radius: 0.375rem;
 }
 
 .msg-bubble-assistant {
+  max-width: min(92%, 42rem);
   border: 1px solid var(--border);
   background: var(--card);
   color: var(--card-foreground);
@@ -276,6 +280,15 @@ watch(
 .msg-parts {
   display: grid;
   gap: 0.75rem;
+  min-width: 0;
+}
+
+.msg-bubble :deep(.msg-text),
+.msg-bubble :deep(.msg-val),
+.msg-bubble :deep(.msg-code),
+.msg-bubble :deep(.msg-link) {
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .msg-error {
@@ -481,7 +494,15 @@ watch(
 
 @media (max-width: 640px) {
   .msg-bubble {
-    max-width: 90%;
+    max-width: 96%;
+  }
+
+  .msg-bubble-user {
+    max-width: 88%;
+  }
+
+  .msg-bubble-assistant {
+    max-width: 97%;
   }
 }
 </style>

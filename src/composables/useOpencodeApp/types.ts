@@ -17,6 +17,7 @@ export type ChatOptionsSnapshot = {
   agents: ChatAgentRecord[]
   commands: ChatCommandRecord[]
   models: ChatModelRecord[]
+  defaultModelKey: string
 }
 
 export type ChatSelectionOptions = {
@@ -36,6 +37,12 @@ export type ProviderModelInfo = {
   id: string
   name?: string
   status?: string
+  limit?: {
+    context: number
+    input?: number
+    output: number
+  }
+  variants?: Record<string, { disabled?: boolean; [key: string]: unknown }>
 }
 
 export type ProviderInfo = {

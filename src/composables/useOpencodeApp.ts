@@ -14,11 +14,13 @@ import {
   buildModelCatalog,
   mapGlobalSession,
   mapProjectCatalogEntry,
-  resolveChatSelections
+  resolveChatSelections,
+  resolveDefaultModelKey
 } from '@/composables/useOpencodeApp/catalog'
 import {
   GLOBAL_CHAT_OPTIONS_KEY,
   INITIAL_HISTORY_LIMIT,
+  PROJECT_SESSION_PAGE_SIZE,
   RECENT_PROJECT_WINDOW,
   SESSION_LIST_LIMIT,
   STORAGE_KEYS
@@ -82,6 +84,8 @@ export function useOpencodeApp() {
   )
   const selectedAgentId = ref(readStorage(STORAGE_KEYS.selectedAgent, ''))
   const selectedModelKey = ref(normalizeModelKey(readStorage(STORAGE_KEYS.selectedModel, '')))
+  const selectedVariant = ref(readStorage(STORAGE_KEYS.selectedVariant, ''))
+  const defaultModelKey = ref('')
   const composerText = ref('')
   const selectedCommandName = ref('')
   const availableAgents = ref<ChatAgentRecord[]>([])
@@ -278,6 +282,7 @@ export function useOpencodeApp() {
     selectedCommand,
     selectedCommandName,
     selectedModel,
+    selectedVariant,
     selectedSessionId,
     sessionPreviewMessages,
     sessionStatus,
@@ -307,6 +312,8 @@ export function useOpencodeApp() {
     rejectQuestion,
     replyPermission,
     replyQuestion,
+    stopCurrentSession,
+    stopDesktopSession,
     sendCurrentMessage,
     sendDesktopMessage,
     sendPromptToSession
@@ -321,6 +328,7 @@ export function useOpencodeApp() {
     availableAgents.value = []
     availableCommands.value = []
     availableModels.value = []
+    defaultModelKey.value = ''
     desktopSessions.value = {}
     closeStream?.()
     closeStream = null
@@ -348,22 +356,55 @@ export function useOpencodeApp() {
     return normalizeDirectory(directory) || GLOBAL_CHAT_OPTIONS_KEY
   }
 
-  function setAvailableChatOptions(snapshot: ChatOptionsSnapshot, options: { preferredAgentId?: string; preferredModelKey?: string } = {}) {
+  function getDefaultVariant(variants: string[]) {
+    if (!variants.length) {
+      return ''
+    }
+
+    if (variants.includes('medium')) {
+      return 'medium'
+    }
+
+    return variants[0] || ''
+  }
+
+  function resolveVariantForModel(modelKey: string, models: ChatModelRecord[], candidate?: string) {
+    const model = models.find((item) => item.key === normalizeModelKey(modelKey)) ?? null
+    const variants = model?.variants ?? []
+    if (!variants.length) {
+      return ''
+    }
+
+    return candidate && variants.includes(candidate) ? candidate : getDefaultVariant(variants)
+  }
+
+  function setAvailableChatOptions(
+    snapshot: ChatOptionsSnapshot,
+    options: { preferredAgentId?: string; preferredModelKey?: string; preferredVariant?: string } = {}
+  ) {
     availableModels.value = snapshot.models
     availableAgents.value = snapshot.agents
     availableCommands.value = snapshot.commands
+    defaultModelKey.value = snapshot.defaultModelKey
 
     if (!availableCommands.value.some((command) => command.name === selectedCommandName.value)) {
       selectedCommandName.value = ''
     }
 
     applyChatSelections(options)
+
+    const agentVariant = availableAgents.value.find((agent) => agent.id === selectedAgentId.value)?.variant
+    selectedVariant.value = resolveVariantForModel(
+      selectedModelKey.value,
+      availableModels.value,
+      options.preferredVariant || selectedVariant.value || agentVariant
+    )
   }
 
   function setDesktopSessionChatOptions(
     sessionState: DesktopSessionState,
     snapshot: ChatOptionsSnapshot,
-    options: { preferredAgentId?: string; preferredModelKey?: string } = {}
+    options: { preferredAgentId?: string; preferredModelKey?: string; preferredVariant?: string } = {}
   ) {
     sessionState.availableModels = snapshot.models
     sessionState.availableAgents = snapshot.agents
@@ -382,6 +423,13 @@ export function useOpencodeApp() {
 
     sessionState.selectedAgentId = nextSelections.selectedAgentId
     sessionState.selectedModelKey = nextSelections.selectedModelKey
+
+    const agentVariant = sessionState.availableAgents.find((agent) => agent.id === sessionState.selectedAgentId)?.variant
+    sessionState.selectedVariant = resolveVariantForModel(
+      sessionState.selectedModelKey,
+      sessionState.availableModels,
+      options.preferredVariant || sessionState.selectedVariant || agentVariant
+    )
   }
 
   async function fetchChatOptionsSnapshot(directory?: string) {
@@ -399,6 +447,7 @@ export function useOpencodeApp() {
 
     return {
       models: buildModelCatalog((providerData ?? {}) as ConfigProvidersResponse),
+      defaultModelKey: resolveDefaultModelKey((providerData ?? {}) as ConfigProvidersResponse),
       agents: buildAgentCatalog((agentData ?? []) as AgentInfo[]),
       commands: buildCommandCatalog(
         (scopedCommandData ?? []) as OpencodeCommand[],
@@ -461,7 +510,8 @@ export function useOpencodeApp() {
       {
         agents: availableAgents.value,
         commands: availableCommands.value,
-        models: availableModels.value
+        models: availableModels.value,
+        defaultModelKey: defaultModelKey.value
       },
       {
         currentAgentId: selectedAgentId.value,
@@ -479,6 +529,7 @@ export function useOpencodeApp() {
     directory?: string
     preferredAgentId?: string
     preferredModelKey?: string
+    preferredVariant?: string
   } = {}) {
     const directory = normalizeDirectory(options.directory ?? chatOptionDirectory.value)
     const snapshot = await ensureChatOptionsSnapshot(directory)
@@ -487,13 +538,16 @@ export function useOpencodeApp() {
 
   function selectModel(modelKey: string) {
     selectedModelKey.value = normalizeModelKey(modelKey)
+    selectedVariant.value = resolveVariantForModel(selectedModelKey.value, availableModels.value, selectedVariant.value)
   }
 
   function selectAgent(agentId: string) {
     selectedAgentId.value = agentId
+    const agentVariant = availableAgents.value.find((agent) => agent.id === agentId)?.variant
 
     const agentModel = availableAgents.value.find((agent) => agent.id === agentId)?.model
     if (!agentModel) {
+      selectedVariant.value = resolveVariantForModel(selectedModelKey.value, availableModels.value, agentVariant || selectedVariant.value)
       return
     }
 
@@ -501,19 +555,32 @@ export function useOpencodeApp() {
     if (availableModels.value.some((model) => model.key === nextModelKey)) {
       selectedModelKey.value = nextModelKey
     }
+
+    selectedVariant.value = resolveVariantForModel(selectedModelKey.value, availableModels.value, agentVariant || selectedVariant.value)
   }
 
   function selectDesktopModel(sessionId: string, modelKey: string) {
     const sessionState = ensureDesktopSessionState(sessionId)
     sessionState.selectedModelKey = normalizeModelKey(modelKey)
+    sessionState.selectedVariant = resolveVariantForModel(
+      sessionState.selectedModelKey,
+      sessionState.availableModels,
+      sessionState.selectedVariant
+    )
   }
 
   function selectDesktopAgent(sessionId: string, agentId: string) {
     const sessionState = ensureDesktopSessionState(sessionId)
     sessionState.selectedAgentId = agentId
+    const agentVariant = sessionState.availableAgents.find((agent) => agent.id === agentId)?.variant
 
     const agentModel = sessionState.availableAgents.find((agent) => agent.id === agentId)?.model
     if (!agentModel) {
+      sessionState.selectedVariant = resolveVariantForModel(
+        sessionState.selectedModelKey,
+        sessionState.availableModels,
+        agentVariant || sessionState.selectedVariant
+      )
       return
     }
 
@@ -521,6 +588,25 @@ export function useOpencodeApp() {
     if (sessionState.availableModels.some((model) => model.key === nextModelKey)) {
       sessionState.selectedModelKey = nextModelKey
     }
+
+    sessionState.selectedVariant = resolveVariantForModel(
+      sessionState.selectedModelKey,
+      sessionState.availableModels,
+      agentVariant || sessionState.selectedVariant
+    )
+  }
+
+  function selectVariant(variant: string) {
+    selectedVariant.value = resolveVariantForModel(selectedModelKey.value, availableModels.value, variant.trim())
+  }
+
+  function selectDesktopVariant(sessionId: string, variant: string) {
+    const sessionState = ensureDesktopSessionState(sessionId)
+    sessionState.selectedVariant = resolveVariantForModel(
+      sessionState.selectedModelKey,
+      sessionState.availableModels,
+      variant.trim()
+    )
   }
 
   function selectDesktopCommand(sessionId: string, commandName: string) {
@@ -554,20 +640,101 @@ export function useOpencodeApp() {
     void sendCurrentMessage()
   }
 
-  async function listGlobalSessions() {
+  function getSessionUpdatedAt(session: Pick<SessionRecord, 'time'>) {
+    return session.time?.updated ?? session.time?.created ?? 0
+  }
+
+  function sortSessionsByUpdated<T extends SessionRecord>(items: T[]) {
+    return [...items].sort((left, right) => getSessionUpdatedAt(right) - getSessionUpdatedAt(left))
+  }
+
+  function syncSessionCollections(nextSessions: SessionRecord[]) {
+    sessions.value = nextSessions
+    syncSessionListUiState(nextSessions.map((session) => session.id))
+    syncSessionPreviewCache(nextSessions.map((session) => session.id))
+    syncDesktopSessionStates(nextSessions.map((session) => session.id))
+  }
+
+  function mergeSessions(nextSessions: SessionRecord[]) {
+    if (!nextSessions.length) {
+      return sessions.value
+    }
+
+    const merged = new Map(sessions.value.map((session) => [session.id, session] as const))
+    for (const session of nextSessions) {
+      merged.set(session.id, session)
+    }
+
+    const ordered = sortSessionsByUpdated(Array.from(merged.values()))
+    syncSessionCollections(ordered)
+    return ordered
+  }
+
+  async function fetchExperimentalSessions(options: { directory?: string; cursor?: number; limit: number }) {
     const url = new URL('/experimental/session', serverUrl.value)
     url.searchParams.set('roots', 'true')
-    url.searchParams.set('limit', String(SESSION_LIST_LIMIT))
+    url.searchParams.set('limit', String(options.limit))
+
+    const directory = normalizeDirectory(options.directory)
+    if (directory) {
+      url.searchParams.set('directory', directory)
+    }
+
+    if (options.cursor && Number.isFinite(options.cursor)) {
+      url.searchParams.set('cursor', String(options.cursor))
+    }
 
     const response = await fetch(url.toString(), {
       headers: getRequestHeaders()
     })
 
     if (!response.ok) {
-      throw new Error(`拉取全局会话失败：${response.status} ${response.statusText}`)
+      throw new Error(`拉取会话列表失败：${response.status} ${response.statusText}`)
     }
 
     return ((await response.json()) as GlobalSession[]).map((session) => mapGlobalSession(session))
+  }
+
+  async function listGlobalSessions() {
+    const sessions = await fetchExperimentalSessions({ limit: SESSION_LIST_LIMIT })
+    return sortSessionsByUpdated(sessions.filter((session) => !session.parentID))
+  }
+
+  async function loadMoreProjectSessions(directory: string) {
+    const normalizedDirectory = normalizeDirectory(directory)
+    if (!normalizedDirectory) {
+      return []
+    }
+
+    const loadedProjectSessions = sessions.value.filter((session) => normalizeDirectory(session.directory) === normalizedDirectory)
+    const oldestLoadedAt = loadedProjectSessions.reduce<number>(
+      (oldest, session) => {
+        const updatedAt = getSessionUpdatedAt(session)
+        if (!updatedAt) {
+          return oldest
+        }
+
+        return oldest ? Math.min(oldest, updatedAt) : updatedAt
+      },
+      0
+    )
+
+    lastError.value = ''
+
+    try {
+      const nextSessions = (await fetchExperimentalSessions({
+        directory: normalizedDirectory,
+        cursor: oldestLoadedAt || undefined,
+        limit: PROJECT_SESSION_PAGE_SIZE
+      })).filter((session) => !session.parentID)
+
+      mergeSessions(nextSessions)
+      preloadChatOptions([normalizedDirectory, ...nextSessions.map((session) => session.directory ?? '')])
+      return nextSessions
+    } catch (error) {
+      handleRequestError(error)
+      throw error
+    }
   }
 
   function getClient(directory?: string) {
@@ -639,16 +806,13 @@ export function useOpencodeApp() {
       ])
       const nextSessions = globalSessions
         .filter((session) => !session.parentID)
-        .sort((left, right) => (right.time?.updated ?? 0) - (left.time?.updated ?? 0))
+        .sort((left, right) => getSessionUpdatedAt(right) - getSessionUpdatedAt(left))
 
       projectCatalog.value = ((projectData ?? []) as Project[])
         .map((project) => mapProjectCatalogEntry(project))
         .filter((project) => Boolean(project.directory))
 
-      sessions.value = nextSessions
-      syncSessionListUiState(nextSessions.map((session) => session.id))
-      syncSessionPreviewCache(nextSessions.map((session) => session.id))
-      syncDesktopSessionStates(nextSessions.map((session) => session.id))
+      syncSessionCollections(nextSessions)
 
       const currentSessionExists = nextSessions.some((session) => session.id === selectedSessionId.value)
       if (!currentSessionExists) {
@@ -871,6 +1035,7 @@ export function useOpencodeApp() {
   watch(composerMode, (value) => writeStorage(STORAGE_KEYS.composerMode, value))
   watch(selectedAgentId, (value) => writeStorage(STORAGE_KEYS.selectedAgent, value))
   watch(selectedModelKey, (value) => writeStorage(STORAGE_KEYS.selectedModel, value))
+  watch(selectedVariant, (value) => writeStorage(STORAGE_KEYS.selectedVariant, value))
   watch(chatOptionDirectory, (directory, previousDirectory) => {
     if (!authValidated.value || directory === previousDirectory) {
       return
@@ -908,6 +1073,7 @@ export function useOpencodeApp() {
     composerMode,
     selectedAgentId,
     selectedModelKey,
+    selectedVariant,
     composerText,
     selectedCommandName,
     availableAgents,
@@ -942,11 +1108,14 @@ export function useOpencodeApp() {
     clearSessionListBadges,
     connect,
     refreshSessions,
+    loadMoreProjectSessions,
     openSession,
     openDesktopSession,
     createSession,
     createDesktopSession,
     closeDesktopSession,
+    stopCurrentSession,
+    stopDesktopSession,
     sendPromptToSession,
     sendDesktopMessage,
     loadSessionPreview,
@@ -965,6 +1134,8 @@ export function useOpencodeApp() {
     selectDesktopAgent,
     selectDesktopCommand,
     selectDesktopModel,
+    selectDesktopVariant,
+    selectVariant,
     updateProject,
     sendCurrentMessage
   }

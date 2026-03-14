@@ -6,20 +6,14 @@ import { useRoute, useRouter } from 'vue-router'
 import Button from '@/components/ui/button/Button.vue'
 import ChatComposer from '@/components/chat/ChatComposer.vue'
 import ChatPane from '@/components/chat/ChatPane.vue'
-import { hasActiveToolCall } from '@/composables/useOpencodeApp/messages'
+import { getSessionWorkingInfo } from '@/composables/useOpencodeApp/messages'
 import { useOpencodeStore } from '@/stores/opencode'
 
 const route = useRoute()
 const router = useRouter()
 const app = useOpencodeStore()
 
-const showAgentWorking = computed(() => {
-  if (app.isLoadingSession || app.sessionStatus !== 'busy') {
-    return false
-  }
-
-  return hasActiveToolCall(app.messages)
-})
+const workingInfo = computed(() => getSessionWorkingInfo(app.messages, app.sessionStatus))
 
 async function syncSession(sessionId?: string | string[]) {
   const id = Array.isArray(sessionId) ? sessionId[0] : sessionId
@@ -63,7 +57,7 @@ watch(
     :has-truncated-messages="app.hasTruncatedMessages"
     :history-limit="app.historyMessageLimit"
     :loading-older="app.isLoadingOlderMessages"
-    :show-working-indicator="showAgentWorking"
+    :working-info="workingInfo"
   >
     <template #leading>
       <button class="btn-back" type="button" @click="goBack">

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
-import { SendHorizonal, LoaderCircle } from 'lucide-vue-next'
+import { ImagePlus, SendHorizonal, Square, X } from 'lucide-vue-next'
 
 import {
   Select,
@@ -12,6 +12,7 @@ import {
   SelectValue
 } from '@/components/ui/select'
 import { useOpencodeStore } from '@/stores/opencode'
+import type { ComposerImageAttachment } from '@/types/opencode'
 
 const app = useOpencodeStore()
 const props = withDefaults(
@@ -28,7 +29,10 @@ const DEFAULT_AGENT_VALUE = '__default_agent__'
 const DEFAULT_MODEL_VALUE = '__default_model__'
 const NO_COMMAND_VALUE = '__no_command__'
 const localText = ref('')
+const imageInputEl = ref<HTMLInputElement | null>(null)
 const textareaEl = ref<HTMLTextAreaElement | null>(null)
+const attachedImages = ref<ComposerImageAttachment[]>([])
+const imageError = ref('')
 
 const desktopSession = computed(() => (props.sessionId ? app.desktopSessions[props.sessionId] ?? null : null))
 const availableAgents = computed(() => (props.sessionId ? desktopSession.value?.availableAgents ?? [] : app.availableAgents))
@@ -48,7 +52,14 @@ const canChooseModel = computed(() => availableModels.value.length > 0)
 const hasCommandOptions = computed(() => availableCommands.value.length > 0)
 const selectedAgentValue = computed(() => (props.sessionId ? desktopSession.value?.selectedAgentId || undefined : app.selectedAgentId || undefined))
 const selectedModelValue = computed(() => (props.sessionId ? desktopSession.value?.selectedModelKey || undefined : app.selectedModelKey || undefined))
+const selectedVariantValue = computed(() => (props.sessionId ? desktopSession.value?.selectedVariant || undefined : app.selectedVariant || undefined))
 const selectedCommandValue = computed(() => (props.sessionId ? desktopSession.value?.selectedCommandName || undefined : app.selectedCommandName || undefined))
+const selectedModelDetail = computed(() => {
+  return availableModels.value.find((model) => model.key === selectedModelValue.value) ?? null
+})
+const currentVariants = computed(() => selectedModelDetail.value?.variants ?? [])
+const canChooseVariant = computed(() => currentVariants.value.length > 0)
+const currentMessages = computed(() => (props.sessionId ? desktopSession.value?.messages ?? [] : app.messages))
 const commandGroups = computed(() => {
   return [
     {
@@ -73,9 +84,69 @@ const selectedCommandDescription = computed(() => {
   return app.selectedCommand?.description || ''
 })
 const hasSelectedCommand = computed(() => Boolean(selectedCommandValue.value))
+const hasAttachedImages = computed(() => attachedImages.value.length > 0)
+const canAttachImages = computed(() => !disabled.value && !hasSelectedCommand.value)
 const canSend = computed(() => {
-  return !disabled.value && (Boolean(composerValue.value.trim()) || hasSelectedCommand.value)
+  return !disabled.value && (Boolean(composerValue.value.trim()) || hasSelectedCommand.value || hasAttachedImages.value)
 })
+const canStop = computed(() => isSending.value)
+const composerHintText = computed(() => {
+  if (hasSelectedCommand.value) {
+    return '已选命令，可空内容发送'
+  }
+
+  if (!hasAttachedImages.value) {
+    return ''
+  }
+
+  return attachedImages.value.length === 1 ? '已附 1 张图片' : `已附 ${attachedImages.value.length} 张图片`
+})
+const latestUsage = computed(() => {
+  const model = selectedModelDetail.value
+  if (!model) {
+    return null
+  }
+
+  for (let index = currentMessages.value.length - 1; index >= 0; index -= 1) {
+    const message = currentMessages.value[index]
+    if (message.role !== 'assistant' || !message.tokens || !message.model) {
+      continue
+    }
+
+    if (message.model.providerId !== model.providerId || message.model.modelId !== model.modelId) {
+      continue
+    }
+
+    if (currentVariants.value.length > 0 && (message.variant || '') !== (selectedVariantValue.value || '')) {
+      continue
+    }
+
+    return message.tokens
+  }
+
+  return null
+})
+const contextUsageText = computed(() => {
+  const limit = selectedModelDetail.value?.limit?.context ?? 0
+  if (!limit) {
+    return ''
+  }
+
+  const used = (latestUsage.value?.input ?? 0) + (latestUsage.value?.output ?? 0)
+  return `上下文 ${formatTokenCount(used)} / ${formatTokenCount(limit)}`
+})
+
+function formatTokenCount(value: number) {
+  if (value >= 1000000) {
+    return `${(value / 1000000).toFixed(value >= 10000000 ? 0 : 1)}M`
+  }
+
+  if (value >= 1000) {
+    return `${(value / 1000).toFixed(value >= 100000 ? 0 : 1)}k`
+  }
+
+  return `${value}`
+}
 
 function syncTextareaHeight() {
   const textarea = textareaEl.value
@@ -85,6 +156,96 @@ function syncTextareaHeight() {
 
   textarea.style.height = '0px'
   textarea.style.height = `${Math.min(textarea.scrollHeight, 220)}px`
+}
+
+function createAttachmentId() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+
+  return `img_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+}
+
+function readFileAsDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      if (typeof reader.result !== 'string') {
+        reject(new Error('读取图片失败，请重试。'))
+        return
+      }
+
+      resolve(reader.result)
+    }
+    reader.onerror = () => reject(new Error('读取图片失败，请重试。'))
+    reader.readAsDataURL(file)
+  })
+}
+
+function resetImageInput() {
+  if (imageInputEl.value) {
+    imageInputEl.value.value = ''
+  }
+}
+
+function clearImages() {
+  attachedImages.value = []
+  imageError.value = ''
+  resetImageInput()
+}
+
+function removeImage(imageId: string) {
+  attachedImages.value = attachedImages.value.filter((image) => image.id !== imageId)
+}
+
+function clearSelectedCommand() {
+  if (props.sessionId) {
+    app.selectDesktopCommand(props.sessionId, '')
+    return
+  }
+
+  app.selectCommand('')
+}
+
+function openImagePicker() {
+  if (!canAttachImages.value) {
+    return
+  }
+
+  imageInputEl.value?.click()
+}
+
+async function handleImageChange(event: Event) {
+  const input = event.target as HTMLInputElement
+  const files = Array.from(input.files ?? [])
+  if (!files.length) {
+    return
+  }
+
+  try {
+    const nextImages = await Promise.all(
+      files.map(async (file) => {
+        if (!file.type.startsWith('image/')) {
+          throw new Error('只能上传图片文件。')
+        }
+
+        return {
+          id: createAttachmentId(),
+          filename: file.name,
+          mime: file.type,
+          dataUrl: await readFileAsDataUrl(file)
+        } satisfies ComposerImageAttachment
+      })
+    )
+
+    attachedImages.value = [...attachedImages.value, ...nextImages]
+    imageError.value = ''
+    clearSelectedCommand()
+  } catch (error) {
+    imageError.value = error instanceof Error ? error.message : '读取图片失败，请重试。'
+  } finally {
+    input.value = ''
+  }
 }
 
 function handleAgentChange(value: unknown) {
@@ -109,6 +270,17 @@ function handleModelChange(value: unknown) {
   app.selectModel(nextValue)
 }
 
+function handleVariantChange(value: unknown) {
+  const nextValue = String(value ?? '')
+
+  if (props.sessionId) {
+    app.selectDesktopVariant(props.sessionId, nextValue)
+    return
+  }
+
+  app.selectVariant(nextValue)
+}
+
 function handleCommandChange(value: unknown) {
   const nextValue = value === NO_COMMAND_VALUE ? '' : String(value ?? '')
 
@@ -120,8 +292,16 @@ function handleCommandChange(value: unknown) {
       return
     }
 
+    if (nextValue && attachedImages.value.length) {
+      clearImages()
+    }
+
     app.selectDesktopCommand(props.sessionId, nextValue)
     return
+  }
+
+  if (nextValue && attachedImages.value.length) {
+    clearImages()
   }
 
   app.selectCommand(nextValue)
@@ -141,18 +321,40 @@ function handleComposerInput(value: string) {
 async function handleSend() {
   if (props.sessionId) {
     const text = localText.value.trim()
-    if (!text && !hasSelectedCommand.value) {
+    if (!text && !hasSelectedCommand.value && !hasAttachedImages.value) {
       return
     }
 
-    const sent = await app.sendDesktopMessage(props.sessionId, text)
+    const sent = await app.sendDesktopMessage(props.sessionId, text, attachedImages.value)
     if (sent) {
       localText.value = ''
+      clearImages()
     }
     return
   }
 
-  await app.sendCurrentMessage()
+  const sent = await app.sendCurrentMessage(attachedImages.value)
+  if (sent) {
+    clearImages()
+  }
+}
+
+async function handleStop() {
+  if (props.sessionId) {
+    await app.stopDesktopSession(props.sessionId)
+    return
+  }
+
+  await app.stopCurrentSession()
+}
+
+async function handlePrimaryAction() {
+  if (canStop.value) {
+    await handleStop()
+    return
+  }
+
+  await handleSend()
 }
 
 function handleComposerKeydown(event: KeyboardEvent) {
@@ -169,7 +371,7 @@ function handleComposerKeydown(event: KeyboardEvent) {
   }
 
   event.preventDefault()
-  void handleSend()
+  void handlePrimaryAction()
 }
 
 watch(composerValue, () => {
@@ -177,6 +379,7 @@ watch(composerValue, () => {
 })
 
 watch(() => props.sessionId, () => {
+  clearImages()
   nextTick(syncTextareaHeight)
 })
 
@@ -188,8 +391,8 @@ onMounted(() => {
 <template>
   <footer class="composer" :class="{ 'composer-embedded': embedded }">
     <div class="composer-card">
-      <div class="composer-meta">
-        <div class="composer-selects">
+      <div class="composer-meta composer-meta-top">
+        <div class="composer-selects composer-selects-top">
           <Select
             v-if="canChooseAgent"
             :model-value="selectedAgentValue"
@@ -207,24 +410,6 @@ onMounted(() => {
             </SelectContent>
           </Select>
           <span v-else class="composer-select-empty">默认 Agent</span>
-
-          <Select
-            v-if="canChooseModel"
-            :model-value="selectedModelValue"
-            :disabled="disabled"
-            @update:model-value="handleModelChange"
-          >
-            <SelectTrigger class="composer-select composer-select-model">
-              <SelectValue placeholder="默认模型" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem :value="DEFAULT_MODEL_VALUE">默认模型</SelectItem>
-              <SelectItem v-for="model in availableModels" :key="model.key" :value="model.key">
-                {{ model.providerId }}/{{ model.modelId }}
-              </SelectItem>
-            </SelectContent>
-          </Select>
-          <span v-else class="composer-select-empty">默认模型</span>
 
           <Select
             :model-value="selectedCommandValue"
@@ -252,7 +437,46 @@ onMounted(() => {
         {{ selectedCommandDescription }}
       </div>
 
+      <div v-if="attachedImages.length || imageError" class="composer-attachments">
+        <div v-if="attachedImages.length" class="composer-attachment-list">
+          <div v-for="image in attachedImages" :key="image.id" class="composer-attachment-chip">
+            <img :src="image.dataUrl" :alt="image.filename" class="composer-attachment-thumb" />
+            <div class="composer-attachment-meta">
+              <span class="composer-attachment-name">{{ image.filename }}</span>
+              <button
+                type="button"
+                class="composer-attachment-remove"
+                :disabled="disabled"
+                :aria-label="`移除 ${image.filename}`"
+                @click="removeImage(image.id)"
+              >
+                <X class="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </div>
+        </div>
+        <p v-if="imageError" class="composer-image-error">{{ imageError }}</p>
+      </div>
+
       <div class="composer-input-wrap">
+        <input
+          ref="imageInputEl"
+          class="composer-file-input"
+          type="file"
+          accept="image/*"
+          multiple
+          :disabled="!canAttachImages"
+          @change="handleImageChange"
+        />
+        <button
+          type="button"
+          class="btn-attach"
+          :disabled="!canAttachImages"
+          aria-label="添加图片"
+          @click="openImagePicker"
+        >
+          <ImagePlus class="h-4 w-4" />
+        </button>
         <div class="composer-input-shell" :class="{ 'composer-input-shell-active': canSend }">
         <textarea
           ref="textareaEl"
@@ -265,20 +489,59 @@ onMounted(() => {
           @keydown="handleComposerKeydown"
         />
         <div class="composer-input-hint">
-          <span>{{ hasSelectedCommand ? '已选命令，可空内容发送' : '' }}</span>
-        
+          <span>{{ composerHintText }}</span>
+          <span v-if="contextUsageText" class="composer-context-hint">{{ contextUsageText }}</span>
         </div>
         </div>
         <button
           type="button"
           class="btn-send"
-          :disabled="!canSend"
-          :aria-label="isSending ? '发送中' : '发送消息'"
-          @click="handleSend"
+          :class="{ 'btn-stop': canStop }"
+          :disabled="!canStop && !canSend"
+          :aria-label="canStop ? '停止对话' : '发送消息'"
+          @click="handlePrimaryAction"
         >
-          <LoaderCircle v-if="isSending" class="h-4 w-4 animate-spin" />
+          <Square v-if="canStop" class="h-3.5 w-3.5 fill-current" />
           <SendHorizonal v-else class="h-4 w-4" />
         </button>
+      </div>
+
+      <div class="composer-meta composer-meta-bottom">
+        <div class="composer-selects composer-selects-bottom">
+          <Select
+            v-if="canChooseModel"
+            :model-value="selectedModelValue"
+            :disabled="disabled"
+            @update:model-value="handleModelChange"
+          >
+            <SelectTrigger class="composer-select composer-select-model">
+              <SelectValue placeholder="默认模型" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem :value="DEFAULT_MODEL_VALUE">默认模型</SelectItem>
+              <SelectItem v-for="model in availableModels" :key="model.key" :value="model.key">
+                {{ model.providerId }}/{{ model.modelId }}
+              </SelectItem>
+            </SelectContent>
+          </Select>
+          <span v-else class="composer-select-empty">默认模型</span>
+
+          <Select
+            v-if="canChooseVariant"
+            :model-value="selectedVariantValue"
+            :disabled="disabled"
+            @update:model-value="handleVariantChange"
+          >
+            <SelectTrigger class="composer-select composer-select-variant">
+              <SelectValue placeholder="变体" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem v-for="variant in currentVariants" :key="variant" :value="variant">
+                {{ variant }}
+              </SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
       </div>
     </div>
   </footer>
@@ -305,9 +568,9 @@ onMounted(() => {
 .composer-meta {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+   justify-content: flex-start;
   gap: 0.5rem;
-  padding: 0.5rem 0.75rem 0;
+   padding: 0 0.75rem;
 }
 
 .composer-selects {
@@ -316,7 +579,23 @@ onMounted(() => {
   gap: 0.5rem;
   flex: 1;
   min-width: 0;
+   flex-wrap: wrap;
+ }
+
+.composer-meta-top {
+  padding-top: 0.5rem;
+}
+
+.composer-meta-bottom {
+  padding-bottom: 0.75rem;
+}
+
+.composer-selects-top {
   overflow: hidden;
+}
+
+.composer-selects-bottom {
+  justify-content: flex-start;
 }
 
 .composer-select {
@@ -332,7 +611,11 @@ onMounted(() => {
 }
 
 .composer-select-cmd {
-  max-width: 9rem;
+  max-width: 12rem;
+}
+
+.composer-select-variant {
+  max-width: 7rem;
 }
 
 .composer-select-empty {
@@ -365,12 +648,105 @@ onMounted(() => {
   line-height: 1.5;
 }
 
+.composer-attachments {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem 0;
+}
+
+.composer-attachment-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.625rem;
+}
+
+.composer-attachment-chip {
+  display: grid;
+  gap: 0.375rem;
+  width: 5.5rem;
+}
+
+.composer-attachment-thumb {
+  width: 5.5rem;
+  height: 5.5rem;
+  border: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
+  border-radius: 0.875rem;
+  object-fit: cover;
+  background: color-mix(in srgb, var(--muted) 68%, white 32%);
+}
+
+.composer-attachment-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.composer-attachment-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.68rem;
+  color: var(--muted-foreground);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.composer-attachment-remove {
+  display: grid;
+  width: 1.4rem;
+  height: 1.4rem;
+  place-items: center;
+  border: 0;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--muted) 78%, white 22%);
+  color: var(--foreground);
+  cursor: pointer;
+}
+
+.composer-attachment-remove:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.composer-image-error {
+  margin: 0;
+  color: #b42318;
+  font-size: 0.75rem;
+}
+
 /* ── Input area ── */
 .composer-input-wrap {
   display: flex;
   align-items: flex-end;
    gap: 0.625rem;
-   padding: 0.5rem 0.75rem 0.75rem;
+    padding: 0.5rem 0.75rem 0.75rem;
+}
+
+.composer-file-input {
+  display: none;
+}
+
+.btn-attach {
+  flex-shrink: 0;
+  display: grid;
+  width: 2.25rem;
+  height: 2.25rem;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
+  border-radius: 0.625rem;
+  background: color-mix(in srgb, var(--background) 90%, white 10%);
+  color: var(--foreground);
+  transition: opacity 0.15s;
+  cursor: pointer;
+}
+
+.btn-attach:hover:not(:disabled) {
+  opacity: 0.82;
+}
+
+.btn-attach:disabled {
+  opacity: 0.35;
+  cursor: default;
 }
 
 .composer-input-shell {
@@ -422,6 +798,11 @@ onMounted(() => {
   line-height: 1.4;
 }
 
+.composer-context-hint {
+  margin-left: auto;
+  white-space: nowrap;
+}
+
 .btn-send {
   flex-shrink: 0;
   display: grid;
@@ -434,6 +815,11 @@ onMounted(() => {
   color: var(--primary-foreground);
   transition: opacity 0.15s;
   cursor: pointer;
+}
+
+.btn-stop {
+  background: color-mix(in srgb, var(--destructive) 88%, black 0%);
+  color: var(--destructive-foreground);
 }
 
 .btn-send:hover:not(:disabled) {
@@ -454,7 +840,7 @@ onMounted(() => {
     padding: 0 0.625rem calc(0.75rem + env(safe-area-inset-bottom));
   }
 
-   .composer-meta {
+  .composer-meta {
     flex-direction: column;
     align-items: stretch;
   }
@@ -465,8 +851,13 @@ onMounted(() => {
     width: 100%;
   }
 
+  .composer-meta-bottom {
+    padding-bottom: 0.625rem;
+  }
+
   .composer-select,
   .composer-select-model,
+  .composer-select-variant,
   .composer-select-cmd,
   .composer-select-empty {
     max-width: none;
@@ -480,6 +871,19 @@ onMounted(() => {
   .composer-input-wrap {
     gap: 0.5rem;
     padding: 0.375rem 0.625rem 0.625rem;
+  }
+
+  .composer-attachments {
+    padding: 0.375rem 0.625rem 0;
+  }
+
+  .composer-attachment-chip {
+    width: 4.75rem;
+  }
+
+  .composer-attachment-thumb {
+    width: 4.75rem;
+    height: 4.75rem;
   }
 
   .composer-input {

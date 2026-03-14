@@ -1,25 +1,14 @@
 <script setup lang="ts">
 import { computed, onMounted, watch } from 'vue'
-import { Wifi, WifiOff, MessageSquare, Clock, Folder, ChevronRight } from 'lucide-vue-next'
+import { LoaderCircle, MessageSquare, Wifi, WifiOff } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 
 import Badge from '@/components/ui/badge/Badge.vue'
 import Button from '@/components/ui/button/Button.vue'
-import Card from '@/components/ui/card/Card.vue'
+import { getSessionWorkingInfo } from '@/composables/useOpencodeApp/messages'
 import { formatRelativeTime } from '@/lib/format'
 import { useOpencodeStore } from '@/stores/opencode'
 
-const props = withDefaults(
-  defineProps<{
-    desktopMode?: boolean
-  }>(),
-  {
-    desktopMode: false
-  }
-)
-const emit = defineEmits<{
-  (event: 'open-session', sessionId: string): void
-}>()
 const app = useOpencodeStore()
 const router = useRouter()
 
@@ -66,12 +55,6 @@ function formatSessionDirectory(directory?: string | null) {
 
 function openConversation(sessionId: string) {
   app.clearSessionListBadges(sessionId)
-
-  if (props.desktopMode) {
-    emit('open-session', sessionId)
-    return
-  }
-
   void router.push({ name: 'session', params: { sessionId } })
 }
 
@@ -106,6 +89,27 @@ function getSessionProjectIconStyle(session: (typeof app.sessions)[number]) {
   const accentKey = project?.icon?.color || session.project?.icon?.color || ''
   const accent = accentKey ? ICON_COLOR_VALUES[accentKey] : ''
   return accent ? { '--session-icon-accent': accent } : undefined
+}
+
+function getSessionWorkingState(sessionId: string) {
+  const desktopState = app.desktopSessions[sessionId]
+  const messages = desktopState?.messages || app.sessionPreviewMessages[sessionId] || []
+  const status = desktopState?.sessionStatus || (app.selectedSessionId === sessionId ? app.sessionStatus : 'idle')
+  return getSessionWorkingInfo(messages, status)
+}
+
+function getSessionPreviewState(session: (typeof app.sessions)[number]) {
+  const workingState = getSessionWorkingState(session.id)
+  if (workingState.isWorking) {
+    return workingState
+  }
+
+  return {
+    isWorking: false,
+    kind: 'idle' as const,
+    summaryText: formatSessionDirectory(session.directory),
+    detailText: ''
+  }
 }
 
 onMounted(() => {
@@ -154,7 +158,11 @@ watch(
               />
               <span v-else>{{ getSessionInitial(session.title, session.directory) }}</span>
             </div>
-            <!-- 可以后续添加未读红点 -->
+            <span
+              v-if="getSessionWorkingState(session.id).isWorking"
+              class="session-status-dot"
+              :class="`session-status-dot-${getSessionWorkingState(session.id).kind}`"
+            />
           </div>
 
           <div class="session-info">
@@ -166,9 +174,24 @@ watch(
             </div>
             
             <div class="session-bottom-row">
-              <p class="session-preview">
-                {{ formatSessionDirectory(session.directory) }}
-              </p>
+              <div
+                class="session-preview"
+                :class="{ 'session-preview-working': getSessionPreviewState(session).isWorking }"
+              >
+                <LoaderCircle
+                  v-if="getSessionPreviewState(session).isWorking"
+                  class="session-preview-spinner animate-spin"
+                />
+                <span class="session-preview-text">
+                  {{ getSessionPreviewState(session).summaryText }}
+                </span>
+                <span
+                  v-if="getSessionPreviewState(session).isWorking && getSessionPreviewState(session).detailText"
+                  class="session-preview-detail"
+                >
+                  {{ getSessionPreviewState(session).detailText }}
+                </span>
+              </div>
               <div class="session-badges" v-if="app.getSessionListBadges(session.id).length">
                 <Badge
                   v-for="badge in app.getSessionListBadges(session.id)"
@@ -312,6 +335,31 @@ watch(
   position: relative;
 }
 
+.session-status-dot {
+  position: absolute;
+  right: -0.1rem;
+  bottom: -0.1rem;
+  width: 0.85rem;
+  height: 0.85rem;
+  border: 2px solid var(--background);
+  border-radius: 999px;
+}
+
+.session-status-dot-tool,
+.session-status-dot-reasoning,
+.session-status-dot-busy {
+  color: var(--primary);
+  background: var(--primary);
+  animation: session-working-pulse 1.8s ease-out infinite;
+}
+
+.session-status-dot-question,
+.session-status-dot-permission {
+  color: #d18d1f;
+  background: #d18d1f;
+  animation: session-working-pulse 1.8s ease-out infinite;
+}
+
 .avatar-circle {
   --session-icon-accent: var(--primary);
   width: 3rem;
@@ -373,14 +421,43 @@ watch(
 }
 
 .session-preview {
-  font-size: 0.8125rem;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
   color: var(--muted-foreground);
-  margin: 0;
+  line-height: 1.25rem;
+}
+
+.session-preview-working {
+  color: var(--foreground);
+}
+
+.session-preview-spinner {
+  width: 0.85rem;
+  height: 0.85rem;
+  flex-shrink: 0;
+  color: var(--primary);
+}
+
+.session-preview-text,
+.session-preview-detail {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.session-preview-text {
+  flex-shrink: 0;
+  font-size: 0.8125rem;
+}
+
+.session-preview-detail {
   flex: 1;
-  line-height: 1.25rem;
+  min-width: 0;
+  font-size: 0.75rem;
+  color: var(--muted-foreground);
 }
 
 .session-badges {
@@ -393,6 +470,21 @@ watch(
   padding: 0.125rem 0.375rem;
   font-size: 0.625rem;
   border-radius: 4px;
+}
+
+@keyframes session-working-pulse {
+  0% {
+    transform: scale(0.96);
+    box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 20%, transparent);
+  }
+  70% {
+    transform: scale(1);
+    box-shadow: 0 0 0 0.35rem color-mix(in srgb, currentColor 0%, transparent);
+  }
+  100% {
+    transform: scale(0.96);
+    box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 0%, transparent);
+  }
 }
 
 /* 空状态 */

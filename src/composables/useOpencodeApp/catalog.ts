@@ -25,14 +25,28 @@ export function buildModelCatalog(response?: ConfigProvidersResponse) {
     .flatMap((provider) => {
       return Object.values(provider.models ?? {})
         .filter((model) => model.status !== 'deprecated')
-        .map<ChatModelRecord>((model) => ({
-          key: makeModelKey(provider.id, model.id),
-          providerId: provider.id,
-          providerName: provider.name || provider.id,
-          modelId: model.id,
-          label: model.name || model.id,
-          status: model.status
-        }))
+        .map<ChatModelRecord>((model) => {
+          const variants = Object.entries(model.variants ?? {})
+            .filter(([variant, detail]) => Boolean(variant) && detail?.disabled !== true)
+            .map(([variant]) => variant)
+
+          return {
+            key: makeModelKey(provider.id, model.id),
+            providerId: provider.id,
+            providerName: provider.name || provider.id,
+            modelId: model.id,
+            label: model.name || model.id,
+            status: model.status,
+            variants,
+            limit: model.limit
+              ? {
+                  context: model.limit.context,
+                  input: model.limit.input,
+                  output: model.limit.output
+                }
+              : undefined
+          }
+        })
     })
     .sort((left, right) => {
       const providerCompare = left.providerName.localeCompare(right.providerName)
@@ -42,6 +56,27 @@ export function buildModelCatalog(response?: ConfigProvidersResponse) {
 
       return left.modelId.localeCompare(right.modelId)
     })
+}
+
+export function resolveDefaultModelKey(response?: ConfigProvidersResponse) {
+  const defaults = response?.default
+  if (!defaults) {
+    return ''
+  }
+
+  for (const [providerId, modelValue] of Object.entries(defaults)) {
+    const normalizedValue = normalizeModelKey(modelValue)
+    if (normalizedValue) {
+      return normalizedValue
+    }
+
+    const normalizedKey = normalizeModelKey(makeModelKey(providerId, modelValue))
+    if (normalizedKey) {
+      return normalizedKey
+    }
+  }
+
+  return ''
 }
 
 export function buildAgentCatalog(input?: AgentInfo[]) {
@@ -98,6 +133,7 @@ export function createDesktopSessionState(sessionId: string): DesktopSessionStat
     availableModels: [],
     selectedAgentId: '',
     selectedModelKey: '',
+    selectedVariant: '',
     selectedCommandName: '',
     isLoadingSession: false,
     isSending: false,
@@ -125,6 +161,7 @@ export function resolveChatSelections(snapshot: ChatOptionsSnapshot, options: Ch
     options.preferredModelKey,
     options.currentModelKey,
     agentModelKey,
+    snapshot.defaultModelKey,
     snapshot.models[0]?.key
   ]
     .map((candidate) => normalizeModelKey(candidate))
@@ -144,6 +181,7 @@ export function getHistorySelection(history: MessageHistoryItem[]) {
         providerID?: string
         modelID?: string
       }
+      variant?: string
     }
 
     if (info.role !== 'user') {
@@ -155,13 +193,15 @@ export function getHistorySelection(history: MessageHistoryItem[]) {
       modelKey:
         info.model?.providerID && info.model?.modelID
           ? makeModelKey(info.model.providerID, info.model.modelID)
-          : ''
+          : '',
+      variant: info.variant || ''
     }
   }
 
   return {
     agentId: '',
-    modelKey: ''
+    modelKey: '',
+    variant: ''
   }
 }
 

@@ -5,9 +5,8 @@ import { FolderSync, LoaderCircle, Sparkles, X } from 'lucide-vue-next'
 import Button from '@/components/ui/button/Button.vue'
 import ChatComposer from '@/components/chat/ChatComposer.vue'
 import ChatPane from '@/components/chat/ChatPane.vue'
-import { hasActiveToolCall } from '@/composables/useOpencodeApp/messages'
-import ConversationListView from '@/pages/ConversationListView.vue'
-import ProjectsView from '@/pages/ProjectsView.vue'
+import DesktopProjectSidebar from '@/components/layout/DesktopProjectSidebar.vue'
+import { getSessionWorkingInfo } from '@/composables/useOpencodeApp/messages'
 import { useOpencodeStore } from '@/stores/opencode'
 
 const app = useOpencodeStore()
@@ -47,13 +46,13 @@ function getWindowMessages(sessionId: string) {
   return getDesktopSessionState(sessionId)?.messages || app.sessionPreviewMessages[sessionId] || []
 }
 
-function showPanelWorkingIndicator(sessionId: string) {
+function getPanelWorkingInfo(sessionId: string) {
   const sessionState = getDesktopSessionState(sessionId)
-  if (!sessionState || sessionState.isLoadingSession || sessionState.sessionStatus !== 'busy') {
-    return false
+  if (!sessionState || sessionState.isLoadingSession) {
+    return null
   }
 
-  return hasActiveToolCall(sessionState.messages)
+  return getSessionWorkingInfo(sessionState.messages, sessionState.sessionStatus)
 }
 
 async function openPanel(sessionId: string) {
@@ -147,21 +146,15 @@ watch(
 
 <template>
   <div class="desktop-page">
-    <div class="desktop-note">
-      <Sparkles class="h-4 w-4" />
-      <span>左侧把项目和会话收进同一个边栏，并改成更轻的分割线列表。</span>
-    </div>
+      <div class="desktop-note">
+        <Sparkles class="h-4 w-4" />
+        <span>PC 左侧改成项目树，只在项目下面展示历史对话。</span>
+      </div>
 
-    <div class="desktop-shell">
-      <aside class="desktop-sidebar">
-        <section class="desktop-sidebar-section sidebar-projects">
-          <ProjectsView desktop-mode @open-session="openPanel" />
-        </section>
-
-        <section class="desktop-sidebar-section sidebar-conversations">
-          <ConversationListView desktop-mode @open-session="openPanel" />
-        </section>
-      </aside>
+      <div class="desktop-shell">
+        <aside class="desktop-sidebar">
+          <DesktopProjectSidebar :open-session-ids="openPanelIds" @open-session="openPanel" />
+        </aside>
 
       <main class="desktop-chat-stage">
         <div v-if="openSessions.length" class="chat-grid soft-scrollbar">
@@ -205,7 +198,7 @@ watch(
               :last-error="getDesktopSessionState(session.id)?.lastError || ''"
               :has-truncated-messages="getDesktopSessionState(session.id)?.hasMoreHistory"
               :history-limit="getDesktopSessionState(session.id)?.historyMessageLimit || 0"
-              :show-working-indicator="showPanelWorkingIndicator(session.id)"
+              :working-info="getPanelWorkingInfo(session.id)"
               empty-text="暂无消息"
             >
               <template #trailing>
@@ -278,97 +271,10 @@ watch(
 }
 
 .desktop-sidebar {
-  display: grid;
-  grid-template-rows: minmax(0, 1fr) minmax(0, 1.1fr);
   min-height: 0;
   overflow: hidden;
   padding-right: 1rem;
   border-right: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
-}
-
-.desktop-sidebar-section {
-  min-height: 0;
-  overflow: hidden;
-}
-
-.desktop-sidebar-section + .desktop-sidebar-section {
-  margin-top: 0.75rem;
-  padding-top: 0.75rem;
-  border-top: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
-}
-
-.desktop-sidebar-section :deep(.projects-container),
-.desktop-sidebar-section :deep(.conversations-container) {
-  min-height: 100%;
-  height: 100%;
-  background: transparent;
-}
-
-.desktop-sidebar-section :deep(.projects-header),
-.desktop-sidebar-section :deep(.conversations-header) {
-  padding: 0 0 0.85rem;
-  position: static;
-  background: transparent;
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
-}
-
-.desktop-sidebar-section :deep(.projects-content),
-.desktop-sidebar-section :deep(.conversations-content) {
-  min-height: 0;
-  overflow-y: auto;
-  padding: 0;
-}
-
-.desktop-sidebar-section :deep(.project-grid) {
-  max-width: none;
-  gap: 0;
-}
-
-.desktop-sidebar-section :deep(.empty-hero) {
-  min-height: calc(100% - 4.5rem);
-}
-
-.desktop-sidebar-section :deep(.project-card) {
-  border: none !important;
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 58%, transparent) !important;
-  border-radius: 0 !important;
-  background: transparent !important;
-  box-shadow: none !important;
-}
-
-.desktop-sidebar-section :deep(.project-card::before) {
-  content: none !important;
-}
-
-.desktop-sidebar-section :deep(.project-card:last-child) {
-  border-bottom: none !important;
-}
-
-.desktop-sidebar-section :deep(.project-card:hover) {
-  transform: none;
-  box-shadow: none !important;
-  border-color: color-mix(in srgb, var(--border) 58%, transparent) !important;
-}
-
-.desktop-sidebar-section :deep(.draft-card) {
-  border-style: solid !important;
-}
-
-.desktop-sidebar-section :deep(.card-body) {
-  padding: 1rem 0;
-}
-
-.desktop-sidebar-section :deep(.card-footer) {
-  padding: 0 0 1rem;
-  border-top: none;
-  background: transparent;
-  flex-wrap: wrap;
-  gap: 0.75rem;
-}
-
-.desktop-sidebar-section :deep(.project-edit-trigger) {
-  top: 0.9rem;
-  right: 0;
 }
 
 .desktop-chat-stage {

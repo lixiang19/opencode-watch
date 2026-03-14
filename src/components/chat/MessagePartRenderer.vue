@@ -24,6 +24,10 @@ const fileSourceLabel = computed(() => {
   return `${props.part.source.clientName} · ${props.part.source.uri}`
 })
 
+const isImageFile = computed(() => {
+  return props.part.type === 'file' && props.part.mime.startsWith('image/')
+})
+
 const toolStatusLabel = computed(() => {
   if (props.part.type !== 'tool') {
     return ''
@@ -121,7 +125,8 @@ function formatBool(value: boolean) {
   </details>
 
   <div v-else-if="part.type === 'file'" class="msg-panel">
-    <div class="msg-panel-title">文件</div>
+    <div class="msg-panel-title">{{ isImageFile ? '图片' : '文件' }}</div>
+    <img v-if="isImageFile" class="msg-image-preview" :src="part.url" :alt="part.filename || '图片附件'" />
     <div class="msg-grid">
       <div><span class="msg-key">名称</span><span class="msg-val">{{ part.filename || '未命名文件' }}</span></div>
       <div><span class="msg-key">类型</span><span class="msg-val">{{ part.mime }}</span></div>
@@ -213,6 +218,15 @@ function formatBool(value: boolean) {
 .msg-panel-title {
   font-size: 0.82rem;
   font-weight: 700;
+}
+
+.msg-image-preview {
+  width: min(100%, 22rem);
+  max-height: 18rem;
+  border: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
+  border-radius: 0.875rem;
+  object-fit: contain;
+  background: color-mix(in srgb, var(--muted) 72%, white 28%);
 }
 
 .msg-grid {

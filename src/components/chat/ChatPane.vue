@@ -6,7 +6,7 @@ import Badge from '@/components/ui/badge/Badge.vue'
 import MessageBubble from '@/components/chat/MessageBubble.vue'
 import { isRenderableMessage } from '@/composables/useOpencodeApp/messages'
 import type { Part } from '@opencode-ai/sdk/v2/client'
-import type { ChatMessageRecord } from '@/types/opencode'
+import type { ChatMessageRecord, SessionWorkingInfo } from '@/types/opencode'
 
 const props = withDefaults(
   defineProps<{
@@ -22,7 +22,7 @@ const props = withDefaults(
     loadingOlder?: boolean
     embedded?: boolean
     emptyText?: string
-    showWorkingIndicator?: boolean
+    workingInfo?: SessionWorkingInfo | null
   }>(),
   {
     connected: false,
@@ -34,7 +34,7 @@ const props = withDefaults(
     loadingOlder: false,
     embedded: false,
     emptyText: '还没有消息',
-    showWorkingIndicator: true
+    workingInfo: null
   }
 )
 
@@ -53,6 +53,38 @@ const activityItems = computed(() =>
     msg.parts.filter((p): p is ActivityItem => p.type === 'tool' || p.type === 'reasoning')
   )
 )
+const latestActivityItem = computed(() => activityItems.value[activityItems.value.length - 1] ?? null)
+
+function clipActivityText(input: string, limit = 72) {
+  const text = input.trim().replace(/\s+/g, ' ')
+  if (!text) {
+    return ''
+  }
+
+  return text.length > limit ? `${text.slice(0, limit).trimEnd()}...` : text
+}
+
+function getActivityDisplayText(item: ActivityItem | null) {
+  if (!item) {
+    return ''
+  }
+
+  if (item.type === 'reasoning') {
+    return clipActivityText(item.text)
+  }
+
+  const title = 'title' in item.state && typeof item.state.title === 'string'
+    ? item.state.title.trim()
+    : ''
+  const output = 'output' in item.state && typeof item.state.output === 'string'
+    ? item.state.output.trim()
+    : ''
+  const error = 'error' in item.state && typeof item.state.error === 'string'
+    ? item.state.error.trim()
+    : ''
+
+  return clipActivityText(title || output || error || item.tool)
+}
 
 function toolStatusLabel(status: string) {
   switch (status) {
@@ -69,8 +101,42 @@ const messageTailSignal = computed(() => {
   return `${lastMessage?.id || ''}:${lastMessage?.updatedAt || 0}:${lastMessage?.parts.length || 0}`
 })
 
+const currentWorkingInfo = computed<SessionWorkingInfo>(() => props.workingInfo ?? {
+  isWorking: false,
+  kind: 'idle',
+  summaryText: '',
+  detailText: ''
+})
+
 const showAgentWorking = computed(() => {
-  return Boolean(props.showWorkingIndicator && !props.isLoading)
+  return Boolean(currentWorkingInfo.value.isWorking && !props.isLoading)
+})
+
+const workingBannerClass = computed(() => {
+  switch (currentWorkingInfo.value.kind) {
+    case 'question':
+    case 'permission':
+      return 'chat-working-banner-waiting'
+    default:
+      return 'chat-working-banner-running'
+  }
+})
+
+const workingNeedsAttention = computed(() => {
+  return currentWorkingInfo.value.kind === 'question' || currentWorkingInfo.value.kind === 'permission'
+})
+
+const workingBannerText = computed(() => {
+  const latestActivityText = getActivityDisplayText(latestActivityItem.value)
+  if (latestActivityText) {
+    return latestActivityText
+  }
+
+  if (currentWorkingInfo.value.detailText) {
+    return `${currentWorkingInfo.value.summaryText} · ${currentWorkingInfo.value.detailText}`
+  }
+
+  return currentWorkingInfo.value.summaryText
 })
 
 function scrollToBottom() {
@@ -100,28 +166,40 @@ watch(showAgentWorking, (value, previousValue) => {
 
 <template>
   <div class="chat-layout" :class="{ 'chat-layout-embedded': embedded }">
-    <header class="chat-topbar">
-      <div class="topbar-leading">
-        <slot name="leading" />
-      </div>
+    <div class="chat-head-stack">
+      <header class="chat-topbar">
+        <div class="topbar-leading">
+          <slot name="leading" />
+        </div>
 
-      <div class="topbar-center">
-        <div class="topbar-session-name">{{ title || '对话详情' }}</div>
-        <div class="topbar-project-name">{{ projectName || '未绑定项目' }}</div>
-      </div>
+        <div class="topbar-center">
+          <div class="topbar-session-name">{{ title || '对话详情' }}</div>
+          <div class="topbar-project-name">{{ projectName || '未绑定项目' }}</div>
+        </div>
 
-      <div class="topbar-right">
-        <Badge v-if="busy" tone="accent" class="status-badge">
-          <LoaderCircle class="h-3 w-3 animate-spin" />
-          处理中
-        </Badge>
-        <span class="connection-pill" :class="connected ? 'pill-connected' : 'pill-disconnected'">
-          <span class="connection-dot" />
-          {{ connected ? '已连接' : '未连接' }}
-        </span>
-        <slot name="trailing" />
+        <div class="topbar-right">
+          <Badge v-if="busy" tone="accent" class="status-badge">
+            <LoaderCircle class="h-3 w-3 animate-spin" />
+            处理中
+          </Badge>
+          <span class="connection-pill" :class="connected ? 'pill-connected' : 'pill-disconnected'">
+            <span class="connection-dot" />
+            {{ connected ? '已连接' : '未连接' }}
+          </span>
+          <slot name="trailing" />
+        </div>
+      </header>
+
+      <div v-if="showAgentWorking" class="chat-working-banner" :class="workingBannerClass">
+        <div class="chat-working-banner-icon">
+          <LoaderCircle class="h-3.5 w-3.5" :class="{ 'animate-spin': !workingNeedsAttention }" />
+        </div>
+        <div class="chat-working-banner-copy">
+          <strong>{{ workingNeedsAttention ? '现在需要你处理' : 'AI 正在工作' }}</strong>
+          <span>{{ workingBannerText }}</span>
+        </div>
       </div>
-    </header>
+    </div>
 
     <div ref="streamEl" class="chat-stream soft-scrollbar">
       <div v-if="hasTruncatedMessages" class="chat-history-banner">
@@ -145,46 +223,38 @@ watch(showAgentWorking, (value, previousValue) => {
       <div v-else class="chat-placeholder-row">
         {{ emptyText }}
       </div>
+    </div>
 
-      <div v-if="showAgentWorking" class="chat-working-card">
-        <div class="chat-working-icon">
-          <LoaderCircle class="h-3.5 w-3.5 animate-spin" />
-        </div>
-        <div class="chat-working-body">
-          <strong>正在工作</strong>
-          <span>当前工具执行中，完成后会继续返回结果。</span>
-        </div>
+    <div class="chat-footer-stack">
+      <div v-if="activityItems.length || patchFiles.length" class="chat-meta-bar">
+        <details v-if="activityItems.length" class="meta-disc">
+          <summary class="meta-disc-trigger">活动 · {{ activityItems.length }}</summary>
+          <ul class="meta-disc-list soft-scrollbar">
+            <li v-for="item in activityItems" :key="item.id" class="activity-item">
+              <span class="activity-tag" :class="item.type === 'reasoning' ? 'activity-tag-reasoning' : 'activity-tag-tool'">
+                {{ item.type === 'reasoning' ? '思考' : '工具' }}
+              </span>
+              <span class="activity-name">{{ item.type === 'tool' ? item.tool : '思考过程' }}</span>
+              <span v-if="item.type === 'tool'" class="activity-status" :class="`activity-status-${item.state.status}`">
+                {{ toolStatusLabel(item.state.status) }}
+              </span>
+            </li>
+          </ul>
+        </details>
+
+        <span v-if="activityItems.length && patchFiles.length" class="meta-sep" />
+
+        <details v-if="patchFiles.length" class="meta-disc">
+          <summary class="meta-disc-trigger">补丁 · {{ patchFiles.length }}</summary>
+          <ul class="meta-disc-list soft-scrollbar">
+            <li v-for="file in patchFiles" :key="file" class="patch-file-item">{{ file }}</li>
+          </ul>
+        </details>
       </div>
-    </div>
 
-    <div v-if="activityItems.length || patchFiles.length" class="chat-meta-bar">
-      <details v-if="activityItems.length" class="meta-disc">
-        <summary class="meta-disc-trigger">活动 · {{ activityItems.length }}</summary>
-        <ul class="meta-disc-list soft-scrollbar">
-          <li v-for="item in activityItems" :key="item.id" class="activity-item">
-            <span class="activity-tag" :class="item.type === 'reasoning' ? 'activity-tag-reasoning' : 'activity-tag-tool'">
-              {{ item.type === 'reasoning' ? '思考' : '工具' }}
-            </span>
-            <span class="activity-name">{{ item.type === 'tool' ? item.tool : '思考过程' }}</span>
-            <span v-if="item.type === 'tool'" class="activity-status" :class="`activity-status-${item.state.status}`">
-              {{ toolStatusLabel(item.state.status) }}
-            </span>
-          </li>
-        </ul>
-      </details>
-
-      <span v-if="activityItems.length && patchFiles.length" class="meta-sep" />
-
-      <details v-if="patchFiles.length" class="meta-disc">
-        <summary class="meta-disc-trigger">补丁 · {{ patchFiles.length }}</summary>
-        <ul class="meta-disc-list soft-scrollbar">
-          <li v-for="file in patchFiles" :key="file" class="patch-file-item">{{ file }}</li>
-        </ul>
-      </details>
-    </div>
-
-    <div class="chat-composer-slot">
-      <slot name="composer" />
+      <div class="chat-composer-slot">
+        <slot name="composer" />
+      </div>
     </div>
   </div>
 </template>
@@ -192,11 +262,15 @@ watch(showAgentWorking, (value, previousValue) => {
 <style scoped>
 .chat-layout {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   height: calc(100dvh - var(--tabbar-height, 0px));
   min-height: 0;
   background: var(--background);
   overflow: hidden;
+}
+
+.chat-head-stack {
+  min-height: 0;
 }
 
 .chat-layout-embedded {
@@ -218,6 +292,62 @@ watch(showAgentWorking, (value, previousValue) => {
 
 .chat-layout-embedded .chat-topbar {
   padding-top: 0.875rem;
+}
+
+.chat-working-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.chat-working-banner-running {
+  background: color-mix(in srgb, var(--primary) 8%, var(--card));
+}
+
+.chat-working-banner-waiting {
+  background: color-mix(in srgb, #d18d1f 12%, var(--card));
+}
+
+.chat-working-banner-icon {
+  display: grid;
+  width: 1.6rem;
+  height: 1.6rem;
+  flex-shrink: 0;
+  place-items: center;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--background) 82%, transparent);
+  color: var(--primary);
+}
+
+.chat-working-banner-waiting .chat-working-banner-icon {
+  color: #b57611;
+}
+
+.chat-working-banner-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+.chat-working-banner-copy strong,
+.chat-working-banner-copy span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-working-banner-copy strong {
+  color: var(--foreground);
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.chat-working-banner-copy span {
+  color: var(--muted-foreground);
+  font-size: 0.7rem;
 }
 
 .topbar-leading {
@@ -372,49 +502,13 @@ watch(showAgentWorking, (value, previousValue) => {
   font-size: 0.82rem;
 }
 
-.chat-working-card {
-  display: inline-flex;
-  align-self: flex-start;
-  align-items: center;
-  gap: 0.625rem;
-  max-width: min(84%, 26rem);
-  padding: 0.625rem 0.875rem 0.625rem 0.625rem;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--card);
-  color: var(--card-foreground);
-}
-
-.chat-working-icon {
-  display: grid;
-  width: 1.75rem;
-  height: 1.75rem;
-  flex-shrink: 0;
-  place-items: center;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--primary) 12%, var(--background));
-  color: var(--primary);
-}
-
-.chat-working-body {
-  display: flex;
-  flex-direction: column;
-  gap: 0.125rem;
-}
-
-.chat-working-body strong {
-  color: var(--foreground);
-  font-size: 0.875rem;
-  font-weight: 600;
-}
-
-.chat-working-body span {
-  color: var(--muted-foreground);
-  font-size: 0.75rem;
-  line-height: 1.5;
-}
-
 .chat-composer-slot {
+  min-height: 0;
+}
+
+.chat-footer-stack {
+  display: grid;
+  grid-template-rows: auto auto;
   min-height: 0;
 }
 
@@ -560,8 +654,24 @@ watch(showAgentWorking, (value, previousValue) => {
 }
 
 @media (max-width: 640px) {
+  .chat-layout {
+    grid-template-rows: auto minmax(0, 1fr) auto;
+  }
+
   .chat-history-banner {
     border-radius: 1rem;
+  }
+
+  .chat-working-banner {
+    padding: 0.45rem 0.875rem;
+  }
+
+  .chat-working-banner-copy strong {
+    font-size: 0.72rem;
+  }
+
+  .chat-working-banner-copy span {
+    font-size: 0.68rem;
   }
 }
 </style>

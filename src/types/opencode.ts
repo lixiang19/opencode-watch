@@ -39,12 +39,34 @@ export interface ProjectRecord {
   manual?: boolean
 }
 
+export interface ComposerImageAttachment {
+  id: string
+  filename: string
+  mime: string
+  dataUrl: string
+}
+
 export interface ChatMessageRecord {
   id: string
   role?: Message['role']
   parts: Part[]
   updatedAt?: number
   error?: string
+  model?: {
+    providerId: string
+    modelId: string
+  }
+  variant?: string
+  tokens?: {
+    total?: number
+    input: number
+    output: number
+    reasoning: number
+    cache: {
+      read: number
+      write: number
+    }
+  }
   confirmation?: {
     id: string
     sessionId: string
@@ -81,6 +103,12 @@ export interface ChatModelRecord {
   modelId: string
   label: string
   status?: string
+  variants: string[]
+  limit?: {
+    context: number
+    input?: number
+    output: number
+  }
 }
 
 export interface ChatAgentRecord {
@@ -105,6 +133,14 @@ export interface ChatCommandRecord {
 }
 
 export type ComposerMode = 'prompt' | 'command'
+export type SessionStatus = 'idle' | 'busy'
+
+export interface SessionWorkingInfo {
+  isWorking: boolean
+  kind: 'idle' | 'tool' | 'reasoning' | 'question' | 'permission' | 'busy'
+  summaryText: string
+  detailText: string
+}
 
 export interface DesktopSessionState {
   sessionId: string
@@ -114,11 +150,12 @@ export interface DesktopSessionState {
   availableModels: ChatModelRecord[]
   selectedAgentId: string
   selectedModelKey: string
+  selectedVariant: string
   selectedCommandName: string
   isLoadingSession: boolean
   isSending: boolean
   isLoadingOlderMessages: boolean
-  sessionStatus: 'idle' | 'busy'
+  sessionStatus: SessionStatus
   lastError: string
   historyMessageLimit: number
   hasMoreHistory: boolean

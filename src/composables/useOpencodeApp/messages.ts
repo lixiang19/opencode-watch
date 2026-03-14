@@ -6,10 +6,11 @@ import type {
   PermissionRequest,
   QuestionAnswer,
   QuestionRequest,
-  ToolPart
+   ToolPart,
+   UserMessage
 } from '@opencode-ai/sdk/v2/client'
 
-import type { ChatMessageRecord } from '@/types/opencode'
+import type { ChatMessageRecord, SessionStatus, SessionWorkingInfo } from '@/types/opencode'
 
 import type { ChatToolStatus, MessageHistoryItem } from './types'
 
@@ -48,6 +49,52 @@ function getAssistantErrorText(info: Partial<Message> & { role?: string }) {
   }
 
   return error.name || JSON.stringify(error)
+}
+
+function getMessageModel(info: Partial<Message> & { role?: string }) {
+  if (info.role === 'assistant') {
+    const assistantInfo = info as Partial<AssistantMessage>
+    if (assistantInfo.providerID && assistantInfo.modelID) {
+      return {
+        providerId: assistantInfo.providerID,
+        modelId: assistantInfo.modelID
+      }
+    }
+  }
+
+  if (info.role === 'user') {
+    const userInfo = info as Partial<UserMessage>
+    if (userInfo.model?.providerID && userInfo.model?.modelID) {
+      return {
+        providerId: userInfo.model.providerID,
+        modelId: userInfo.model.modelID
+      }
+    }
+  }
+
+  return undefined
+}
+
+function getMessageTokens(info: Partial<Message> & { role?: string }) {
+  if (info.role !== 'assistant') {
+    return undefined
+  }
+
+  const assistantInfo = info as Partial<AssistantMessage>
+  if (!assistantInfo.tokens) {
+    return undefined
+  }
+
+  return {
+    total: assistantInfo.tokens.total,
+    input: assistantInfo.tokens.input,
+    output: assistantInfo.tokens.output,
+    reasoning: assistantInfo.tokens.reasoning,
+    cache: {
+      read: assistantInfo.tokens.cache.read,
+      write: assistantInfo.tokens.cache.write
+    }
+  }
 }
 
 function ensurePendingDeltaBucket(message: ChatMessageRecord, partId: string) {
@@ -174,6 +221,20 @@ export function ensureChatMessage(messages: ChatMessageRecord[], info: Partial<M
     current.role = info.role
   }
 
+  const model = getMessageModel(info)
+  if (model) {
+    current.model = model
+  }
+
+  if (typeof info.variant === 'string') {
+    current.variant = info.variant
+  }
+
+  const tokens = getMessageTokens(info)
+  if (tokens) {
+    current.tokens = tokens
+  }
+
   current.error = getAssistantErrorText(info)
   current.updatedAt = Date.now()
   return current
@@ -184,6 +245,10 @@ export function ensureAssistantMessage(messages: ChatMessageRecord[], messageId:
     id: messageId,
     role: 'assistant'
   })
+}
+
+function ensureUnknownMessage(messages: ChatMessageRecord[], messageId: string) {
+  return ensureChatMessage(messages, { id: messageId })
 }
 
 export function extractTextContent(parts: Part[]) {
@@ -246,6 +311,180 @@ export function hasActiveToolCall(messages: ChatMessageRecord[]) {
   )
 }
 
+function getLatestPendingQuestion(messages: ChatMessageRecord[]) {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]
+    if (message.question?.status === 'pending') {
+      return message.question
+    }
+  }
+
+  return null
+}
+
+function getLatestPendingPermission(messages: ChatMessageRecord[]) {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]
+    if (message.confirmation && !message.confirmation.response) {
+      return message.confirmation
+    }
+  }
+
+  return null
+}
+
+function getLatestReasoningText(messages: ChatMessageRecord[]) {
+  for (let messageIndex = messages.length - 1; messageIndex >= 0; messageIndex -= 1) {
+    const parts = messages[messageIndex]?.parts ?? []
+    for (let partIndex = parts.length - 1; partIndex >= 0; partIndex -= 1) {
+      const part = parts[partIndex]
+      if (part.type !== 'reasoning') {
+        continue
+      }
+
+      const text = part.text.trim().replace(/\s+/g, ' ')
+      if (text) {
+        return text
+      }
+    }
+  }
+
+  return ''
+}
+
+function getLatestActiveTool(messages: ChatMessageRecord[]) {
+  for (let messageIndex = messages.length - 1; messageIndex >= 0; messageIndex -= 1) {
+    const parts = messages[messageIndex]?.parts ?? []
+    for (let partIndex = parts.length - 1; partIndex >= 0; partIndex -= 1) {
+      const part = parts[partIndex]
+      if (part.type !== 'tool') {
+        continue
+      }
+
+      if (part.state.status === 'pending' || part.state.status === 'running') {
+        return part
+      }
+    }
+  }
+
+  return null
+}
+
+function clipActivityText(input: string, limit = 46) {
+  const text = input.trim().replace(/\s+/g, ' ')
+  if (!text) {
+    return ''
+  }
+
+  return text.length > limit ? `${text.slice(0, limit).trimEnd()}…` : text
+}
+
+function formatToolSummary(toolName: string) {
+  switch (toolName) {
+    case 'bash':
+      return '执行命令'
+    case 'read':
+      return '读取文件'
+    case 'glob':
+    case 'grep':
+      return '检索代码'
+    case 'task':
+      return '调度子任务'
+    case 'question':
+      return '等待补充信息'
+    default:
+      return toolName ? `执行 ${toolName}` : '执行工具中'
+  }
+}
+
+function formatToolDetail(toolName: string, explicitTitle: string) {
+  const title = clipActivityText(explicitTitle)
+  if (title) {
+    return title
+  }
+
+  switch (toolName) {
+    case 'bash':
+      return '正在执行本地命令'
+    case 'read':
+      return '正在读取相关文件'
+    case 'glob':
+    case 'grep':
+      return '正在定位相关代码'
+    case 'task':
+      return '正在调用子代理处理'
+    default:
+      return clipActivityText(toolName || '当前工具执行中')
+  }
+}
+
+export function getSessionWorkingInfo(
+  messages: ChatMessageRecord[],
+  sessionStatus: SessionStatus = 'idle'
+): SessionWorkingInfo {
+  const pendingQuestion = getLatestPendingQuestion(messages)
+  if (pendingQuestion) {
+    return {
+      isWorking: true,
+      kind: 'question',
+      summaryText: '等你补充信息',
+      detailText: clipActivityText(pendingQuestion.questions[0]?.header || pendingQuestion.questions[0]?.question || '需要你补充信息')
+    }
+  }
+
+  const pendingPermission = getLatestPendingPermission(messages)
+  if (pendingPermission) {
+    return {
+      isWorking: true,
+      kind: 'permission',
+      summaryText: '等待权限确认',
+      detailText: clipActivityText(pendingPermission.type || '需要权限确认')
+    }
+  }
+
+  const activeTool = getLatestActiveTool(messages)
+  if (activeTool) {
+    const explicitTitle = 'title' in activeTool.state && typeof activeTool.state.title === 'string'
+      ? activeTool.state.title.trim()
+      : ''
+
+    return {
+      isWorking: true,
+      kind: 'tool',
+      summaryText: formatToolSummary(activeTool.tool),
+      detailText: formatToolDetail(activeTool.tool, explicitTitle)
+    }
+  }
+
+  const reasoningText = getLatestReasoningText(messages)
+  if (sessionStatus === 'busy' && reasoningText) {
+    return {
+      isWorking: true,
+      kind: 'reasoning',
+      summaryText: '正在整理回复',
+      detailText: /[\u4e00-\u9fa5]/.test(reasoningText)
+        ? '正在整理下一步'
+        : '正在组织回复内容'
+    }
+  }
+
+  if (sessionStatus === 'busy') {
+    return {
+      isWorking: true,
+      kind: 'busy',
+      summaryText: '正在生成回复',
+      detailText: '已收到请求，正在继续处理'
+    }
+  }
+
+  return {
+    isWorking: false,
+    kind: 'idle',
+    summaryText: '',
+    detailText: ''
+  }
+}
+
 export function pruneEmptyAssistantMessages(messages: ChatMessageRecord[]) {
   return messages.filter(
     (message) =>
@@ -264,7 +503,10 @@ export function convertHistoryMessage(item: MessageHistoryItem): ChatMessageReco
     role: item.info.role,
     parts: cloneParts(item.parts),
     updatedAt: item.info.time?.created ?? Date.now(),
-    error: getAssistantErrorText(item.info)
+    error: getAssistantErrorText(item.info),
+    model: getMessageModel(item.info),
+    variant: typeof item.info.variant === 'string' ? item.info.variant : undefined,
+    tokens: getMessageTokens(item.info)
   }
 }
 
@@ -358,7 +600,7 @@ function applyQueuedDeltas(message: ChatMessageRecord, part: Part) {
 }
 
 function upsertMessagePart(messages: ChatMessageRecord[], messageId: string, part: Part) {
-  const current = ensureAssistantMessage(messages, messageId)
+  const current = ensureUnknownMessage(messages, messageId)
   const nextPart = clonePart(part)
   applyQueuedDeltas(current, nextPart)
 
@@ -376,7 +618,7 @@ function upsertMessagePart(messages: ChatMessageRecord[], messageId: string, par
 }
 
 function enqueueMessagePartDelta(messages: ChatMessageRecord[], payload: MessagePartDeltaPayload) {
-  const current = ensureAssistantMessage(messages, payload.messageID)
+  const current = ensureUnknownMessage(messages, payload.messageID)
   ensurePendingDeltaBucket(current, payload.partID).push({
     field: payload.field,
     delta: payload.delta
