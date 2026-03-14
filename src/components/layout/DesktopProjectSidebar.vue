@@ -62,6 +62,7 @@ const activeSessionIds = computed(() => new Set(props.openSessionIds))
 const projectGroups = computed<ProjectSessionGroup[]>(() => {
   const groups = new Map<string, ProjectSessionGroup>()
   const unboundSessions: SessionRecord[] = []
+  const projectById = new Map(app.projects.map((project) => [project.projectId || '', project] as const))
 
   for (const project of app.projects) {
     const key = getProjectIdentityKey(project.projectId, project.directory)
@@ -86,7 +87,7 @@ const projectGroups = computed<ProjectSessionGroup[]>(() => {
 
     const rootDirectory = normalizeDirectory(
       session.project?.worktree ||
-        app.projects.find((project) => project.projectId === (session.projectId || session.project?.id || ''))?.directory ||
+        projectById.get(session.projectId || session.project?.id || '')?.directory ||
         sessionDirectory
     )
     const key = getProjectIdentityKey(session.projectId || session.project?.id || '', rootDirectory || sessionDirectory)
@@ -305,6 +306,18 @@ function getSessionPreviewState(session: SessionRecord) {
     detailText: ''
   }
 }
+
+const sessionRowState = computed(() => {
+  return Object.fromEntries(app.sessions.map((session) => {
+    const previewState = getSessionPreviewState(session)
+
+    return [session.id, {
+      badges: app.getSessionListBadges(session.id),
+      isWorktree: app.isWorktreeSession(session),
+      previewState
+    }] as const
+  }))
+})
 </script>
 
 <template>
@@ -377,39 +390,39 @@ function getSessionPreviewState(session: SessionRecord) {
             :key="session.id"
             type="button"
             class="session-row"
-            :class="{ 'session-row-active': activeSessionIds.has(session.id), 'session-row-worktree': app.isWorktreeSession(session) }"
+            :class="{ 'session-row-active': activeSessionIds.has(session.id), 'session-row-worktree': sessionRowState[session.id]?.isWorktree }"
             @click="openSession(session.id)"
           >
             <div class="session-row-top">
               <div class="session-title-row">
                 <span class="session-title">{{ session.title || '未命名对话' }}</span>
-                <Badge v-if="app.isWorktreeSession(session)" tone="accent" class="worktree-badge">Worktree</Badge>
+                <Badge v-if="sessionRowState[session.id]?.isWorktree" tone="accent" class="worktree-badge">Worktree</Badge>
               </div>
             </div>
 
             <div class="session-row-bottom">
               <div
                 class="session-preview"
-                :class="{ 'session-preview-working': getSessionPreviewState(session).isWorking }"
+                :class="{ 'session-preview-working': sessionRowState[session.id]?.previewState.isWorking }"
               >
                 <LoaderCircle
-                  v-if="getSessionPreviewState(session).isWorking"
+                  v-if="sessionRowState[session.id]?.previewState.isWorking"
                   class="session-preview-spinner animate-spin"
                 />
-                <span class="session-preview-text">{{ getSessionPreviewState(session).summaryText }}</span>
+                <span class="session-preview-text">{{ sessionRowState[session.id]?.previewState.summaryText }}</span>
                 <span
-                  v-if="getSessionPreviewState(session).isWorking && getSessionPreviewState(session).detailText"
+                  v-if="sessionRowState[session.id]?.previewState.isWorking && sessionRowState[session.id]?.previewState.detailText"
                   class="session-preview-detail"
                 >
-                  {{ getSessionPreviewState(session).detailText }}
+                  {{ sessionRowState[session.id]?.previewState.detailText }}
                 </span>
                 <span class="session-meta-dot">·</span>
                 <span class="session-time">{{ formatRelativeTime(session.time.updated || session.time.created) }}</span>
               </div>
 
-              <div v-if="app.getSessionListBadges(session.id).length" class="session-badges">
+              <div v-if="sessionRowState[session.id]?.badges.length" class="session-badges">
                 <Badge
-                  v-for="badge in app.getSessionListBadges(session.id)"
+                  v-for="badge in sessionRowState[session.id]?.badges"
                   :key="badge.key"
                   :tone="badge.tone"
                   class="session-badge"

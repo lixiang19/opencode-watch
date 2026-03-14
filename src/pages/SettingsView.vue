@@ -197,7 +197,7 @@ const installStatusText = computed(() => {
                 <RefreshCw v-else class="h-4 w-4 mr-2 animate-spin" />
                 {{ app.isConnecting ? '连接中' : '测试并连接' }}
               </Button>
-              <Button variant="outline" class="action-btn" :disabled="app.isRefreshing" @click="app.refreshSessions({ reopen: false })">
+              <Button variant="outline" class="action-btn" :disabled="app.isRefreshing" @click="app.refreshSessions({ reopen: false, refreshProjects: true })">
                 <RefreshCw class="h-4 w-4 mr-2" :class="app.isRefreshing ? 'animate-spin' : ''" />
                 同步数据
               </Button>

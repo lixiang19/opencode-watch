@@ -18,8 +18,10 @@ import {
   resolveDefaultModelKey
 } from '@/composables/useOpencodeApp/catalog'
 import {
+  CHAT_OPTIONS_PRELOAD_SESSION_LIMIT,
   GLOBAL_CHAT_OPTIONS_KEY,
   INITIAL_HISTORY_LIMIT,
+  MOBILE_SESSION_CACHE_LIMIT,
   PROJECT_SESSION_PAGE_SIZE,
   RECENT_PROJECT_WINDOW,
   SESSION_LIST_LIMIT,
@@ -66,9 +68,11 @@ import type {
 
 import type {
   AgentInfo,
+  CachedSessionState,
   ChatOptionsSnapshot,
   ConfigProvidersResponse,
   ProjectCatalogEntry,
+  SessionHistorySelection,
   SessionListUiState,
   SkillInfo
 } from '@/composables/useOpencodeApp/types'
@@ -112,7 +116,12 @@ export function useOpencodeApp() {
   const sessionListUiState = ref<Record<string, SessionListUiState>>({})
 
   const clientCache = new Map<string, OpencodeClient>()
+  const mobileSessionCache = new Map<string, CachedSessionState>()
+  const mobileSessionCacheOrder: string[] = []
   let closeStream: (() => void) | null = null
+  let preloadHomeDataRequest: Promise<void> | null = null
+  let suppressedChatOptionLoadKey = ''
+  let activeChatOptionsRequestId = 0
   const chatOptionsCache = new Map<string, ChatOptionsSnapshot>()
   const chatOptionsRequests = new Map<string, Promise<ChatOptionsSnapshot>>()
   const worktreeBranchState = ref<Record<string, { branch: string; loading: boolean; error: string }>>({})
@@ -154,6 +163,76 @@ export function useOpencodeApp() {
     return Math.max(messages.value.filter((message) => isRenderableMessage(message)).length - visibleMessages.value.length, 0)
   })
   const hasTruncatedMessages = computed(() => hasMoreHistory.value || hiddenMessageCount.value > 0)
+
+  function touchMobileSessionCache(sessionId: string) {
+    const currentIndex = mobileSessionCacheOrder.indexOf(sessionId)
+    if (currentIndex >= 0) {
+      mobileSessionCacheOrder.splice(currentIndex, 1)
+    }
+
+    mobileSessionCacheOrder.push(sessionId)
+  }
+
+  function trimMobileSessionCache() {
+    while (mobileSessionCacheOrder.length > MOBILE_SESSION_CACHE_LIMIT) {
+      let evictedSessionId = ''
+
+      for (let index = 0; index < mobileSessionCacheOrder.length; index += 1) {
+        const candidate = mobileSessionCacheOrder[index]
+        if (candidate === selectedSessionId.value || desktopSessions.value[candidate]) {
+          continue
+        }
+
+        evictedSessionId = candidate
+        mobileSessionCacheOrder.splice(index, 1)
+        break
+      }
+
+      if (!evictedSessionId) {
+        return
+      }
+
+      mobileSessionCache.delete(evictedSessionId)
+    }
+  }
+
+  function getCachedSessionState(sessionId: string) {
+    const cached = mobileSessionCache.get(sessionId) ?? null
+    if (cached) {
+      touchMobileSessionCache(sessionId)
+    }
+    return cached
+  }
+
+  function setCachedSessionState(sessionId: string, state: CachedSessionState) {
+    mobileSessionCache.set(sessionId, state)
+    touchMobileSessionCache(sessionId)
+    trimMobileSessionCache()
+  }
+
+  function removeCachedSessionState(sessionId: string) {
+    if (!mobileSessionCache.delete(sessionId)) {
+      return
+    }
+
+    const currentIndex = mobileSessionCacheOrder.indexOf(sessionId)
+    if (currentIndex >= 0) {
+      mobileSessionCacheOrder.splice(currentIndex, 1)
+    }
+  }
+
+  function syncCachedSessionStates(sessionIds: string[]) {
+    const validIds = new Set(sessionIds)
+    for (const sessionId of [...mobileSessionCache.keys()]) {
+      if (!validIds.has(sessionId)) {
+        removeCachedSessionState(sessionId)
+      }
+    }
+  }
+
+  function suppressNextChatOptionLoad(directory?: string) {
+    suppressedChatOptionLoadKey = getChatOptionsCacheKey(directory)
+  }
 
   const projects = computed<ProjectRecord[]>(() => {
     const cutoff = Date.now() - RECENT_PROJECT_WINDOW
@@ -452,12 +531,15 @@ export function useOpencodeApp() {
     ensureChatOptionsSnapshot,
     ensureDesktopSessionState,
     getClient,
+    getCachedSessionState,
     handleRequestError,
     invalidateAuth,
     loadChatOptions,
     refreshSessions: (options) => refreshSessions(options),
     removeDesktopSessionState,
+    setCachedSessionState,
     setDesktopSessionChatOptions,
+    suppressNextChatOptionLoad,
     syncSessionPreviewFromMessages
   })
   const {
@@ -486,8 +568,13 @@ export function useOpencodeApp() {
     authValidated.value = false
     streamReady.value = false
     clientCache.clear()
+    mobileSessionCache.clear()
+    mobileSessionCacheOrder.splice(0, mobileSessionCacheOrder.length)
     chatOptionsCache.clear()
     chatOptionsRequests.clear()
+    preloadHomeDataRequest = null
+    suppressedChatOptionLoadKey = ''
+    activeChatOptionsRequestId = 0
     worktreeBranchRequests.clear()
     worktreeBranchState.value = {}
     availableAgents.value = []
@@ -649,6 +736,7 @@ export function useOpencodeApp() {
 
   function preloadChatOptions(directories: string[]) {
     const uniqueDirectories = Array.from(new Set(directories.map((directory) => normalizeDirectory(directory)).filter(Boolean)))
+      .slice(0, CHAT_OPTIONS_PRELOAD_SESSION_LIMIT)
 
     void Promise.allSettled([
       ensureChatOptionsSnapshot(),
@@ -661,13 +749,26 @@ export function useOpencodeApp() {
       return
     }
 
-    const directories = [draftDirectory.value, ...sessions.value.map((session) => session.directory ?? '')]
-    await Promise.allSettled([
+    if (preloadHomeDataRequest) {
+      return preloadHomeDataRequest
+    }
+
+    const directories = [
+      sessionDirectory.value,
+      draftDirectory.value,
+      ...sessions.value.slice(0, CHAT_OPTIONS_PRELOAD_SESSION_LIMIT).map((session) => session.directory ?? '')
+    ]
+
+    preloadHomeDataRequest = Promise.allSettled([
       ensureChatOptionsSnapshot(),
-      ...Array.from(new Set(directories.map((directory) => normalizeDirectory(directory)).filter(Boolean))).map((directory) =>
-        ensureChatOptionsSnapshot(directory)
-      )
-    ])
+      ...Array.from(new Set(directories.map((directory) => normalizeDirectory(directory)).filter(Boolean)))
+        .slice(0, CHAT_OPTIONS_PRELOAD_SESSION_LIMIT)
+        .map((directory) => ensureChatOptionsSnapshot(directory))
+    ]).then(() => undefined).finally(() => {
+      preloadHomeDataRequest = null
+    })
+
+    return preloadHomeDataRequest
   }
 
   function applyChatSelections(options: { preferredAgentId?: string; preferredModelKey?: string } = {}) {
@@ -697,7 +798,13 @@ export function useOpencodeApp() {
     preferredVariant?: string
   } = {}) {
     const directory = normalizeDirectory(options.directory ?? chatOptionDirectory.value)
+    const requestId = ++activeChatOptionsRequestId
     const snapshot = await ensureChatOptionsSnapshot(directory)
+
+    if (requestId !== activeChatOptionsRequestId) {
+      return
+    }
+
     setAvailableChatOptions(snapshot, options)
   }
 
@@ -817,6 +924,7 @@ export function useOpencodeApp() {
     sessions.value = nextSessions
     syncSessionListUiState(nextSessions.map((session) => session.id))
     syncSessionPreviewCache(nextSessions.map((session) => session.id))
+    syncCachedSessionStates(nextSessions.map((session) => session.id))
     syncDesktopSessionStates(nextSessions.map((session) => session.id))
   }
 
@@ -894,7 +1002,7 @@ export function useOpencodeApp() {
       })).filter((session) => !session.parentID)
 
       mergeSessions(nextSessions)
-      preloadChatOptions([normalizedDirectory, ...nextSessions.map((session) => session.directory ?? '')])
+      preloadChatOptions([normalizedDirectory, ...nextSessions.slice(0, CHAT_OPTIONS_PRELOAD_SESSION_LIMIT).map((session) => session.directory ?? '')])
       return nextSessions
     } catch (error) {
       handleRequestError(error)
@@ -961,21 +1069,23 @@ export function useOpencodeApp() {
     })()
   }
 
-  async function refreshSessions(options: { reopen?: boolean } = {}) {
+  async function refreshSessions(options: { reopen?: boolean; refreshProjects?: boolean } = {}) {
     isRefreshing.value = true
     try {
       const currentClient = getClient()
-      const [globalSessions, { data: projectData }] = await Promise.all([
+      const [globalSessions, projectResult] = await Promise.all([
         listGlobalSessions(),
-        currentClient.project.list()
+        options.refreshProjects ? currentClient.project.list() : Promise.resolve({ data: null })
       ])
       const nextSessions = globalSessions
         .filter((session) => !session.parentID)
         .sort((left, right) => getSessionUpdatedAt(right) - getSessionUpdatedAt(left))
 
-      projectCatalog.value = ((projectData ?? []) as Project[])
-        .map((project) => mapProjectCatalogEntry(project))
-        .filter((project) => Boolean(project.directory))
+      if (projectResult.data) {
+        projectCatalog.value = ((projectResult.data ?? []) as Project[])
+          .map((project) => mapProjectCatalogEntry(project))
+          .filter((project) => Boolean(project.directory))
+      }
 
       syncSessionCollections(nextSessions)
 
@@ -994,7 +1104,7 @@ export function useOpencodeApp() {
 
       preloadChatOptions([
         draftDirectory.value,
-        ...nextSessions.map((session) => session.directory ?? '')
+        ...nextSessions.slice(0, CHAT_OPTIONS_PRELOAD_SESSION_LIMIT).map((session) => session.directory ?? '')
       ])
     } finally {
       isRefreshing.value = false
@@ -1070,7 +1180,7 @@ export function useOpencodeApp() {
 
       void Promise.allSettled([
         loadChatOptions(),
-        refreshSessions({ reopen: false })
+        refreshSessions({ reopen: false, refreshProjects: true })
       ]).then((results) => {
         const rejected = results.find(
           (result): result is PromiseRejectedResult => result.status === 'rejected'
@@ -1089,6 +1199,39 @@ export function useOpencodeApp() {
     } finally {
       isConnecting.value = false
     }
+  }
+
+  function updateMessageCollection(currentMessages: ChatMessageRecord[], event: OpencodeEvent) {
+    return applyEventToMessageCollection(currentMessages, event)
+  }
+
+  function updateCachedSessionMessages(sessionId: string, nextMessages: ChatMessageRecord[]) {
+    const cached = mobileSessionCache.get(sessionId)
+    if (!cached) {
+      return
+    }
+
+    cached.messages = nextMessages
+    setCachedSessionState(sessionId, cached)
+  }
+
+  function updateCachedSessionStatus(sessionId: string, nextStatus: 'idle' | 'busy') {
+    const cached = mobileSessionCache.get(sessionId)
+    if (!cached) {
+      return
+    }
+
+    cached.sessionStatus = nextStatus
+    setCachedSessionState(sessionId, cached)
+  }
+
+  function syncSelectedSessionPreview() {
+    if (!selectedSessionId.value) {
+      return
+    }
+
+    syncSessionPreviewFromMessages(selectedSessionId.value, messages.value)
+    updateCachedSessionMessages(selectedSessionId.value, messages.value)
   }
 
 
@@ -1125,18 +1268,33 @@ export function useOpencodeApp() {
 
     if (eventSessionId) {
       const desktopSessionState = desktopSessions.value[eventSessionId]
+      const cachedSessionState = mobileSessionCache.get(eventSessionId)
 
       if (selectedSessionId.value === eventSessionId) {
-        messages.value = applyEventToMessageCollection(messages.value.slice(), event)
+        const nextMessages = updateMessageCollection(messages.value, event)
+        if (nextMessages !== messages.value) {
+          messages.value = nextMessages
+        }
+        syncSelectedSessionPreview()
       }
 
       if (desktopSessionState) {
-        desktopSessionState.messages = applyEventToMessageCollection(desktopSessionState.messages.slice(), event)
+        const nextMessages = updateMessageCollection(desktopSessionState.messages, event)
+        if (nextMessages !== desktopSessionState.messages) {
+          desktopSessionState.messages = nextMessages
+        }
         syncSessionPreviewFromMessages(eventSessionId, desktopSessionState.messages)
+      } else if (cachedSessionState) {
+        const nextMessages = updateMessageCollection(cachedSessionState.messages, event)
+        if (nextMessages !== cachedSessionState.messages) {
+          cachedSessionState.messages = nextMessages
+        }
+        setCachedSessionState(eventSessionId, cachedSessionState)
+        syncSessionPreviewFromMessages(eventSessionId, cachedSessionState.messages)
       } else if (selectedSessionId.value !== eventSessionId && sessionPreviewMessages.value[eventSessionId]) {
-        sessionPreviewMessages.value = {
-          ...sessionPreviewMessages.value,
-          [eventSessionId]: applyEventToMessageCollection(sessionPreviewMessages.value[eventSessionId].slice(), event)
+        const nextPreviewMessages = updateMessageCollection(sessionPreviewMessages.value[eventSessionId], event)
+        if (nextPreviewMessages !== sessionPreviewMessages.value[eventSessionId]) {
+          sessionPreviewMessages.value[eventSessionId] = nextPreviewMessages
         }
       }
 
@@ -1164,6 +1322,21 @@ export function useOpencodeApp() {
           }
         }
       }
+
+      if (cachedSessionState) {
+        switch (event.type) {
+          case 'session.status': {
+            const { status } = event.properties as { status: { type: 'idle' | 'busy' | 'retry' } }
+            updateCachedSessionStatus(eventSessionId, status.type === 'busy' ? 'busy' : 'idle')
+            break
+          }
+          case 'session.idle':
+          case 'session.error': {
+            updateCachedSessionStatus(eventSessionId, 'idle')
+            break
+          }
+        }
+      }
     }
 
     if (!selectedSessionId.value || eventSessionId !== selectedSessionId.value) {
@@ -1174,12 +1347,14 @@ export function useOpencodeApp() {
       case 'session.status': {
         const { status } = event.properties as { status: { type: 'idle' | 'busy' | 'retry' } }
         sessionStatus.value = status.type === 'busy' ? 'busy' : 'idle'
+        updateCachedSessionStatus(eventSessionId, sessionStatus.value)
         break
       }
       case 'session.idle': {
         messages.value = pruneEmptyAssistantMessages(messages.value)
         sessionStatus.value = 'idle'
         isSending.value = false
+        syncSelectedSessionPreview()
         break
       }
       case 'session.error': {
@@ -1188,6 +1363,7 @@ export function useOpencodeApp() {
         lastError.value = JSON.stringify(event.properties)
         sessionStatus.value = 'idle'
         isSending.value = false
+        syncSelectedSessionPreview()
         break
       }
     }
@@ -1205,24 +1381,19 @@ export function useOpencodeApp() {
     writeSessionStorage(STORAGE_KEYS.password, nextPassword)
   })
   watch(selectedSessionId, (value) => writeStorage(STORAGE_KEYS.selectedSession, value))
-  watch(
-    [selectedSessionId, messages],
-    ([sessionId, nextMessages]) => {
-      if (!sessionId) {
-        return
-      }
-
-      syncSessionPreviewFromMessages(sessionId, nextMessages)
-    },
-    { deep: true }
-  )
   watch(draftDirectory, (value) => writeStorage(STORAGE_KEYS.draftDirectory, value))
   watch(composerMode, (value) => writeStorage(STORAGE_KEYS.composerMode, value))
   watch(selectedAgentId, (value) => writeStorage(STORAGE_KEYS.selectedAgent, value))
   watch(selectedModelKey, (value) => writeStorage(STORAGE_KEYS.selectedModel, value))
   watch(selectedVariant, (value) => writeStorage(STORAGE_KEYS.selectedVariant, value))
   watch(chatOptionDirectory, (directory, previousDirectory) => {
+    const cacheKey = getChatOptionsCacheKey(directory)
     if (!authValidated.value || directory === previousDirectory) {
+      return
+    }
+
+    if (suppressedChatOptionLoadKey === cacheKey) {
+      suppressedChatOptionLoadKey = ''
       return
     }
 

@@ -2,10 +2,10 @@ import type { ComputedRef, Ref } from 'vue'
 import type { QuestionAnswer, QuestionRequest } from '@opencode-ai/sdk/v2/client'
 
 import { getHistorySelection } from './catalog'
-import { HISTORY_LIMIT_STEP, INITIAL_HISTORY_LIMIT } from './constants'
+import { HISTORY_LIMIT_STEP, INITIAL_HISTORY_LIMIT, SESSION_PREVIEW_MESSAGE_LIMIT } from './constants'
 import { buildWorktreeSessionName, isUnauthorizedError, makeModelKey, normalizeDirectory, normalizeModelKey, parseError } from './helpers'
-import { applyQuestionAsked, convertHistoryMessage, pruneEmptyAssistantMessages } from './messages'
-import type { MessageHistoryItem } from './types'
+import { applyQuestionAsked, buildSessionPreviewMessages, convertHistoryMessage, pruneEmptyAssistantMessages } from './messages'
+import type { CachedSessionState, MessageHistoryItem, SessionHistorySelection } from './types'
 import type {
   ChatAgentRecord,
   ChatCommandRecord,
@@ -52,11 +52,14 @@ export function createSessionActions(args: {
   loadChatOptions: (options?: { directory?: string; preferredAgentId?: string; preferredModelKey?: string; preferredVariant?: string }) => Promise<void>
   refreshSessions: (options?: { reopen?: boolean }) => Promise<void>
   removeDesktopSessionState: (sessionId: string) => void
+  getCachedSessionState: (sessionId: string) => CachedSessionState | null
+  setCachedSessionState: (sessionId: string, state: CachedSessionState) => void
   setDesktopSessionChatOptions: (
     sessionState: DesktopSessionState,
     snapshot: { agents: ChatAgentRecord[]; commands: ChatCommandRecord[]; models: ChatModelRecord[]; defaultModelKey: string },
     options?: { preferredAgentId?: string; preferredModelKey?: string; preferredVariant?: string }
   ) => void
+  suppressNextChatOptionLoad: (directory?: string) => void
   syncSessionPreviewFromMessages: (sessionId: string, nextMessages: ChatMessageRecord[]) => void
 }) {
   function getSessionDirectory(sessionId?: string) {
@@ -94,36 +97,86 @@ export function createSessionActions(args: {
     return `[${imageCount} 张图片]`
   }
 
-  async function fetchSessionRuntimeData(sessionId: string, messageLimit: number) {
-    const directory = getSessionDirectory(sessionId)
-    const currentClient = args.getClient(directory)
-    const [{ data: session }, { data: history }, { data: questions }] = await Promise.all([
-      currentClient.session.get({ sessionID: sessionId, directory: directory || undefined }),
-      currentClient.session.messages({
-        sessionID: sessionId,
-        directory: directory || undefined,
-        limit: messageLimit
-      }),
-      currentClient.question.list({ directory: directory || undefined })
-    ])
-
-    const historyItems = (history ?? []) as MessageHistoryItem[]
-    const nextMessages = pruneEmptyAssistantMessages(historyItems.map(convertHistoryMessage))
-    const pendingQuestions = ((questions ?? []) as QuestionRequest[]).filter((item) => item.sessionID === sessionId)
-
-    for (const request of pendingQuestions) {
-      applyQuestionAsked(nextMessages, request)
-    }
-
-    return {
-      normalizedDirectory: normalizeDirectory(session?.directory || directory),
-      historyItems,
-      messages: nextMessages,
-      historySelection: getHistorySelection(historyItems)
+  function applyPendingQuestions(messages: ChatMessageRecord[], requests: QuestionRequest[]) {
+    for (const request of requests) {
+      applyQuestionAsked(messages, request)
     }
   }
 
-  async function openSession(sessionId: string, options: { messageLimit?: number } = {}) {
+  async function fetchPendingQuestions(sessionId: string, directory: string) {
+    const currentClient = args.getClient(directory)
+    const { data: questions } = await currentClient.question.list({ directory: directory || undefined })
+    return ((questions ?? []) as QuestionRequest[]).filter((item) => item.sessionID === sessionId)
+  }
+
+  function cacheSelectedSession(
+    sessionId: string,
+    normalizedDirectory: string,
+    nextMessages: ChatMessageRecord[],
+    messageLimit: number,
+    hasMoreHistory: boolean,
+    historySelection: SessionHistorySelection
+  ) {
+    args.setCachedSessionState(sessionId, {
+      sessionId,
+      normalizedDirectory,
+      messages: nextMessages,
+      historyMessageLimit: messageLimit,
+      hasMoreHistory,
+      sessionStatus: args.selectedSessionId.value === sessionId ? args.sessionStatus.value : 'idle',
+      historySelection
+    })
+  }
+
+  function refreshSelectedSessionQuestions(sessionId: string, normalizedDirectory: string) {
+    void fetchPendingQuestions(sessionId, normalizedDirectory)
+      .then((pendingQuestions) => {
+        if (!pendingQuestions.length) {
+          return
+        }
+
+        const cached = args.getCachedSessionState(sessionId)
+        if (!cached) {
+          return
+        }
+
+        applyPendingQuestions(cached.messages, pendingQuestions)
+        args.syncSessionPreviewFromMessages(sessionId, cached.messages)
+        args.setCachedSessionState(sessionId, cached)
+
+        if (args.selectedSessionId.value === sessionId) {
+          args.messages.value = cached.messages
+        }
+      })
+      .catch((error) => {
+        if (args.selectedSessionId.value === sessionId) {
+          args.handleRequestError(error)
+        }
+      })
+  }
+
+  async function fetchSessionRuntimeData(sessionId: string, messageLimit: number) {
+    const directory = getSessionDirectory(sessionId)
+    const currentClient = args.getClient(directory)
+    const { data: history } = await currentClient.session.messages({
+      sessionID: sessionId,
+      directory: directory || undefined,
+      limit: messageLimit
+    })
+
+    const historyItems = (history ?? []) as MessageHistoryItem[]
+    const nextMessages = pruneEmptyAssistantMessages(historyItems.map(convertHistoryMessage))
+    const historySelection = getHistorySelection(historyItems)
+
+    return {
+      normalizedDirectory: normalizeDirectory(directory),
+      historyItems,
+      messages: nextMessages,
+      historySelection
+    }
+  }
+
+  async function openSession(sessionId: string, options: { messageLimit?: number; force?: boolean } = {}) {
     if (!sessionId) {
       return
     }
@@ -132,27 +185,60 @@ export function createSessionActions(args: {
       options.messageLimit ?? (args.selectedSessionId.value === sessionId ? args.historyMessageLimit.value : INITIAL_HISTORY_LIMIT),
       INITIAL_HISTORY_LIMIT
     )
+    const cached = !options.force ? args.getCachedSessionState(sessionId) : null
+    const sessionDirectory = cached?.normalizedDirectory || getSessionDirectory(sessionId)
+
+    args.suppressNextChatOptionLoad(sessionDirectory)
+    args.selectedSessionId.value = sessionId
+    args.lastError.value = ''
+
+    if (cached && requestedLimit <= cached.historyMessageLimit) {
+      args.historyMessageLimit.value = cached.historyMessageLimit
+      args.hasMoreHistory.value = cached.hasMoreHistory
+      args.messages.value = cached.messages
+      args.sessionStatus.value = cached.sessionStatus
+      args.syncSessionPreviewFromMessages(sessionId, cached.messages)
+      args.suppressNextChatOptionLoad(cached.normalizedDirectory)
+      void args.loadChatOptions({
+        directory: cached.normalizedDirectory,
+        preferredAgentId: cached.historySelection.agentId,
+        preferredModelKey: cached.historySelection.modelKey,
+        preferredVariant: cached.historySelection.variant
+      })
+      return
+    }
+
+    const previewMessages = args.sessionPreviewMessages.value[sessionId]
+    args.messages.value = previewMessages?.length ? buildSessionPreviewMessages(previewMessages) : []
+    args.sessionStatus.value = cached?.sessionStatus ?? 'idle'
 
     args.isLoadingSession.value = true
-    args.lastError.value = ''
 
     try {
       const sessionData = await fetchSessionRuntimeData(sessionId, requestedLimit)
 
       args.historyMessageLimit.value = requestedLimit
       args.hasMoreHistory.value = sessionData.historyItems.length >= requestedLimit
-      args.selectedSessionId.value = sessionId
 
-      await args.loadChatOptions({
+      args.messages.value = sessionData.messages
+      args.syncSessionPreviewFromMessages(sessionId, args.messages.value)
+      args.sessionStatus.value = 'idle'
+      cacheSelectedSession(
+        sessionId,
+        sessionData.normalizedDirectory,
+        args.messages.value,
+        requestedLimit,
+        args.hasMoreHistory.value,
+        sessionData.historySelection
+      )
+      args.suppressNextChatOptionLoad(sessionData.normalizedDirectory)
+      void args.loadChatOptions({
         directory: sessionData.normalizedDirectory,
         preferredAgentId: sessionData.historySelection.agentId,
         preferredModelKey: sessionData.historySelection.modelKey,
         preferredVariant: sessionData.historySelection.variant
       })
-
-      args.messages.value = sessionData.messages
-      args.syncSessionPreviewFromMessages(sessionId, args.messages.value)
-      args.sessionStatus.value = 'idle'
+      refreshSelectedSessionQuestions(sessionId, sessionData.normalizedDirectory)
     } catch (error) {
       args.handleRequestError(error)
     } finally {
@@ -209,18 +295,53 @@ export function createSessionActions(args: {
 
     try {
       const sessionData = await fetchSessionRuntimeData(sessionId, requestedLimit)
-      const snapshot = await args.ensureChatOptionsSnapshot(sessionData.normalizedDirectory)
 
       sessionState.historyMessageLimit = requestedLimit
       sessionState.hasMoreHistory = sessionData.historyItems.length >= requestedLimit
       sessionState.messages = sessionData.messages
       sessionState.sessionStatus = 'idle'
-      args.setDesktopSessionChatOptions(sessionState, snapshot, {
-        preferredAgentId: sessionData.historySelection.agentId,
-        preferredModelKey: sessionData.historySelection.modelKey,
-        preferredVariant: sessionData.historySelection.variant
-      })
       args.syncSessionPreviewFromMessages(sessionId, sessionState.messages)
+
+      void args.ensureChatOptionsSnapshot(sessionData.normalizedDirectory)
+        .then((snapshot) => {
+          const nextSessionState = args.desktopSessions.value[sessionId]
+          if (!nextSessionState) {
+            return
+          }
+
+          args.setDesktopSessionChatOptions(nextSessionState, snapshot, {
+            preferredAgentId: sessionData.historySelection.agentId,
+            preferredModelKey: sessionData.historySelection.modelKey,
+            preferredVariant: sessionData.historySelection.variant
+          })
+        })
+        .catch((error) => {
+          const nextSessionState = args.desktopSessions.value[sessionId]
+          if (nextSessionState) {
+            nextSessionState.lastError = parseError(error)
+          }
+        })
+
+      void fetchPendingQuestions(sessionId, sessionData.normalizedDirectory)
+        .then((pendingQuestions) => {
+          if (!pendingQuestions.length) {
+            return
+          }
+
+          const nextSessionState = args.desktopSessions.value[sessionId]
+          if (!nextSessionState) {
+            return
+          }
+
+          applyPendingQuestions(nextSessionState.messages, pendingQuestions)
+          args.syncSessionPreviewFromMessages(sessionId, nextSessionState.messages)
+        })
+        .catch((error) => {
+          const nextSessionState = args.desktopSessions.value[sessionId]
+          if (nextSessionState) {
+            nextSessionState.lastError = parseError(error)
+          }
+        })
 
       return sessionState
     } catch (error) {
@@ -369,11 +490,11 @@ export function createSessionActions(args: {
       const { data: history } = await currentClient.session.messages({
         sessionID: sessionId,
         directory: directory || undefined,
-        limit: Math.max(options.limit ?? 24, 12)
+        limit: Math.max(options.limit ?? SESSION_PREVIEW_MESSAGE_LIMIT, SESSION_PREVIEW_MESSAGE_LIMIT)
       })
       const preview = pruneEmptyAssistantMessages(((history ?? []) as MessageHistoryItem[]).map(convertHistoryMessage))
       args.syncSessionPreviewFromMessages(sessionId, preview)
-      return preview
+      return buildSessionPreviewMessages(preview)
     } catch (error) {
       if (args.selectedSessionId.value === sessionId) {
         args.handleRequestError(error)
@@ -428,6 +549,12 @@ export function createSessionActions(args: {
     args.sessionStatus.value = 'busy'
     args.lastError.value = ''
 
+    const cachedSession = args.getCachedSessionState(args.selectedSessionId.value)
+    if (cachedSession) {
+      cachedSession.sessionStatus = 'busy'
+      args.setCachedSessionState(args.selectedSessionId.value, cachedSession)
+    }
+
     try {
       const currentSessionId = args.selectedSessionId.value
       if (hasCommand) {
@@ -464,6 +591,11 @@ export function createSessionActions(args: {
       args.handleRequestError(error)
       args.isSending.value = false
       args.sessionStatus.value = 'idle'
+      const nextCachedSession = args.getCachedSessionState(args.selectedSessionId.value)
+      if (nextCachedSession) {
+        nextCachedSession.sessionStatus = 'idle'
+        args.setCachedSessionState(args.selectedSessionId.value, nextCachedSession)
+      }
       return false
     }
   }
@@ -566,6 +698,11 @@ export function createSessionActions(args: {
       args.clearPendingCompletionNotice(sessionId)
       args.isSending.value = false
       args.sessionStatus.value = 'idle'
+      const cachedSession = args.getCachedSessionState(sessionId)
+      if (cachedSession) {
+        cachedSession.sessionStatus = 'idle'
+        args.setCachedSessionState(sessionId, cachedSession)
+      }
       return true
     } catch (error) {
       args.handleRequestError(error)

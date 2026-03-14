@@ -112,6 +112,22 @@ function getSessionPreviewState(session: (typeof app.sessions)[number]) {
   }
 }
 
+const sessionCardState = computed(() => {
+  return Object.fromEntries(app.sessions.map((session) => {
+    const isWorktree = app.isWorktreeSession(session)
+    const previewState = getSessionPreviewState(session)
+
+    return [session.id, {
+      badges: app.getSessionListBadges(session.id),
+      iconSrc: getSessionProjectIcon(session),
+      iconStyle: getSessionProjectIconStyle(session),
+      initial: getSessionInitial(session.title, session.directory),
+      isWorktree,
+      previewState
+    }] as const
+  }))
+})
+
 onMounted(() => {
   void app.preloadHomeData()
 })
@@ -146,23 +162,23 @@ watch(
           v-for="session in app.sessions"
           :key="session.id"
           class="session-item"
-          :class="{ 'session-item-worktree': app.isWorktreeSession(session) }"
+          :class="{ 'session-item-worktree': sessionCardState[session.id]?.isWorktree }"
           @click="openConversation(session.id)"
         >
           <div class="session-avatar-box">
-            <div class="avatar-circle" :class="{ 'avatar-circle-worktree': app.isWorktreeSession(session) }" :style="getSessionProjectIconStyle(session)">
+            <div class="avatar-circle" :class="{ 'avatar-circle-worktree': sessionCardState[session.id]?.isWorktree }" :style="sessionCardState[session.id]?.iconStyle">
               <img
-                v-if="getSessionProjectIcon(session)"
-                :src="getSessionProjectIcon(session)"
+                v-if="sessionCardState[session.id]?.iconSrc"
+                :src="sessionCardState[session.id]?.iconSrc"
                 alt=""
                 class="avatar-image"
               />
-              <span v-else>{{ getSessionInitial(session.title, session.directory) }}</span>
+              <span v-else>{{ sessionCardState[session.id]?.initial }}</span>
             </div>
             <span
-              v-if="getSessionWorkingState(session.id).isWorking"
+              v-if="sessionCardState[session.id]?.previewState.isWorking"
               class="session-status-dot"
-              :class="`session-status-dot-${getSessionWorkingState(session.id).kind}`"
+              :class="`session-status-dot-${sessionCardState[session.id]?.previewState.kind}`"
             />
           </div>
 
@@ -170,7 +186,7 @@ watch(
             <div class="session-top-row">
               <div class="session-title-row">
                 <h3 class="session-title">{{ session.title || '未命名对话' }}</h3>
-                <Badge v-if="app.isWorktreeSession(session)" tone="accent" class="worktree-badge">Worktree</Badge>
+                <Badge v-if="sessionCardState[session.id]?.isWorktree" tone="accent" class="worktree-badge">Worktree</Badge>
               </div>
               <span class="session-time">
                 {{ formatRelativeTime(session.time.updated || session.time.created) }}
@@ -180,25 +196,25 @@ watch(
             <div class="session-bottom-row">
               <div
                 class="session-preview"
-                :class="{ 'session-preview-working': getSessionPreviewState(session).isWorking }"
+                :class="{ 'session-preview-working': sessionCardState[session.id]?.previewState.isWorking }"
               >
                 <LoaderCircle
-                  v-if="getSessionPreviewState(session).isWorking"
+                  v-if="sessionCardState[session.id]?.previewState.isWorking"
                   class="session-preview-spinner animate-spin"
                 />
                 <span class="session-preview-text">
-                  {{ getSessionPreviewState(session).summaryText }}
+                  {{ sessionCardState[session.id]?.previewState.summaryText }}
                 </span>
                 <span
-                  v-if="getSessionPreviewState(session).isWorking && getSessionPreviewState(session).detailText"
+                  v-if="sessionCardState[session.id]?.previewState.isWorking && sessionCardState[session.id]?.previewState.detailText"
                   class="session-preview-detail"
                 >
-                  {{ getSessionPreviewState(session).detailText }}
+                  {{ sessionCardState[session.id]?.previewState.detailText }}
                 </span>
               </div>
-              <div class="session-badges" v-if="app.getSessionListBadges(session.id).length">
+              <div class="session-badges" v-if="sessionCardState[session.id]?.badges.length">
                 <Badge
-                  v-for="badge in app.getSessionListBadges(session.id)"
+                  v-for="badge in sessionCardState[session.id]?.badges"
                   :key="badge.key"
                   :tone="badge.tone"
                   class="session-badge"

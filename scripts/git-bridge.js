@@ -5,6 +5,9 @@ import { spawn } from 'node:child_process'
 
 const host = process.env.OPCHAT_GIT_BRIDGE_HOST ?? '127.0.0.1'
 const port = Number.parseInt(process.env.OPCHAT_GIT_BRIDGE_PORT ?? '9001', 10)
+const STATUS_CACHE_TTL_MS = 3000
+const statusCache = new Map()
+const pendingStatusRequests = new Map()
 
 const server = http.createServer(async (request, response) => {
   setCors(response)
@@ -41,6 +44,7 @@ const server = http.createServer(async (request, response) => {
 
         await runGit(['-C', directory, 'add', '-A'])
         await runGit(['-C', directory, 'commit', '-m', message])
+        clearStatusCache([directory])
         sendJson(response, 200, { ok: true })
         return
       }
@@ -56,6 +60,7 @@ const server = http.createServer(async (request, response) => {
         }
 
         await runGit(['-C', directory, 'merge', branch])
+        clearStatusCache([directory])
         sendJson(response, 200, { ok: true })
         return
       }
@@ -71,6 +76,7 @@ const server = http.createServer(async (request, response) => {
 
         await runGit(['-C', rootDirectory, 'worktree', 'remove', worktreeDirectory])
         await runGit(['-C', rootDirectory, 'branch', '-d', branch])
+        clearStatusCache([rootDirectory, worktreeDirectory])
         sendJson(response, 200, { ok: true })
         return
       }
@@ -167,17 +173,43 @@ function runGit(args) {
 }
 
 async function getGitStatus(directory) {
-  const result = await runGit(['-C', directory, 'status', '--porcelain=v1', '--branch'])
-  const lines = result.stdout.split(/\r?\n/).filter(Boolean)
-  const branchLine = lines[0] ?? ''
-  const branch = parseBranchName(branchLine)
-  const changedLines = branchLine.startsWith('## ') ? lines.slice(1) : lines
-
-  return {
-    branch,
-    dirty: changedLines.length > 0,
-    changedCount: changedLines.length
+  const cached = statusCache.get(directory)
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.value
   }
+
+  const pending = pendingStatusRequests.get(directory)
+  if (pending) {
+    return pending
+  }
+
+  const request = runGit(['-C', directory, 'status', '--porcelain=v1', '--branch'])
+    .then((result) => {
+      const lines = result.stdout.split(/\r?\n/).filter(Boolean)
+      const branchLine = lines[0] ?? ''
+      const branch = parseBranchName(branchLine)
+      const changedLines = branchLine.startsWith('## ') ? lines.slice(1) : lines
+
+      const nextStatus = {
+        branch,
+        dirty: changedLines.length > 0,
+        changedCount: changedLines.length
+      }
+
+      statusCache.set(directory, {
+        value: nextStatus,
+        expiresAt: Date.now() + STATUS_CACHE_TTL_MS
+      })
+
+      return nextStatus
+    })
+    .finally(() => {
+      pendingStatusRequests.delete(directory)
+    })
+
+  pendingStatusRequests.set(directory, request)
+  return request
+
 }
 
 function parseBranchName(branchLine) {
@@ -191,4 +223,15 @@ function parseBranchName(branchLine) {
   }
 
   return raw.split('...')[0]?.trim() || raw.trim()
+}
+
+function clearStatusCache(directories) {
+  for (const directory of directories) {
+    if (!directory) {
+      continue
+    }
+
+    statusCache.delete(directory)
+    pendingStatusRequests.delete(directory)
+  }
 }

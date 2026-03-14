@@ -12,6 +12,7 @@ import type {
 
 import type { ChatMessageRecord, SessionStatus, SessionWorkingInfo } from '@/types/opencode'
 
+import { SESSION_PREVIEW_MESSAGE_LIMIT } from './constants'
 import type { ChatToolStatus, MessageHistoryItem } from './types'
 
 type MessagePartDeltaPayload = {
@@ -491,6 +492,14 @@ export function pruneEmptyAssistantMessages(messages: ChatMessageRecord[]) {
       isRenderableMessage(message) ||
       message.parts.some((p) => p.type === 'tool' || p.type === 'reasoning' || p.type === 'patch')
   )
+}
+
+export function buildSessionPreviewMessages(messages: ChatMessageRecord[]) {
+  if (messages.length <= SESSION_PREVIEW_MESSAGE_LIMIT) {
+    return messages.slice()
+  }
+
+  return messages.slice(-SESSION_PREVIEW_MESSAGE_LIMIT)
 }
 
 export function getToolStatus(status: 'pending' | 'running' | 'completed' | 'error'): ChatToolStatus {

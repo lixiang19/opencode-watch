@@ -1,5 +1,6 @@
 import type { Ref } from 'vue'
 
+import { buildSessionPreviewMessages } from './messages'
 import { createDesktopSessionState } from './catalog'
 import { SESSION_LIST_REFRESH_DELAY } from './constants'
 import type { SessionListFlag, SessionListUiState } from './types'
@@ -128,10 +129,7 @@ export function createSessionStateManager(args: {
       return
     }
 
-    args.sessionPreviewMessages.value = {
-      ...args.sessionPreviewMessages.value,
-      [sessionId]: nextMessages.slice()
-    }
+    args.sessionPreviewMessages.value[sessionId] = buildSessionPreviewMessages(nextMessages)
   }
 
   function scheduleSessionListRefresh(options: { newSessionId?: string } = {}) {

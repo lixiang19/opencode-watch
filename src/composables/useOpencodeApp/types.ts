@@ -5,7 +5,8 @@ import type {
   ChatCommandRecord,
   ChatMessageRecord,
   ChatModelRecord,
-  ProjectIconRecord
+  ProjectIconRecord,
+  SessionStatus
 } from '@/types/opencode'
 
 export type PendingCompletionNotice = {
@@ -81,6 +82,22 @@ export type ProjectCatalogEntry = {
   name: string
   lastUpdated: number
   icon?: ProjectIconRecord
+}
+
+export type SessionHistorySelection = {
+  agentId: string
+  modelKey: string
+  variant: string
+}
+
+export type CachedSessionState = {
+  sessionId: string
+  normalizedDirectory: string
+  messages: ChatMessageRecord[]
+  historyMessageLimit: number
+  hasMoreHistory: boolean
+  sessionStatus: SessionStatus
+  historySelection: SessionHistorySelection
 }
 
 export type MediaQueryWithLegacyListeners = MediaQueryList & {

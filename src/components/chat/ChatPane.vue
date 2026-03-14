@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { LoaderCircle } from 'lucide-vue-next'
 
 import Badge from '@/components/ui/badge/Badge.vue'
@@ -40,26 +40,49 @@ const props = withDefaults(
 )
 
 const streamEl = ref<HTMLElement>()
-const renderableMessages = computed(() => props.messages.filter((message) => isRenderableMessage(message)))
-const patchParts = computed(() =>
-  props.messages.flatMap((msg) =>
-    msg.parts.filter((p): p is Extract<Part, { type: 'patch' }> => p.type === 'patch')
-  )
-)
-const patchFiles = computed(() => {
-  return [...new Set(patchParts.value.flatMap((p) => p.files))].map((file) => ({
-    fullPath: file,
-    displayPath: formatPathTail(file, 4)
-  }))
-})
+const shouldStickToBottom = ref(true)
+let scrollFrame = 0
 
 type ActivityItem = Extract<Part, { type: 'tool' }> | Extract<Part, { type: 'reasoning' }>
-const activityItems = computed(() =>
-  props.messages.flatMap((msg) =>
-    msg.parts.filter((p): p is ActivityItem => p.type === 'tool' || p.type === 'reasoning')
-  )
-)
-const latestActivityItem = computed(() => activityItems.value[activityItems.value.length - 1] ?? null)
+
+const messageAnalysis = computed(() => {
+  const renderableMessages: ChatMessageRecord[] = []
+  const activityItems: ActivityItem[] = []
+  const patchFileSet = new Set<string>()
+
+  for (const message of props.messages) {
+    if (isRenderableMessage(message)) {
+      renderableMessages.push(message)
+    }
+
+    for (const part of message.parts) {
+      if (part.type === 'tool' || part.type === 'reasoning') {
+        activityItems.push(part)
+      }
+
+      if (part.type === 'patch') {
+        for (const file of part.files) {
+          patchFileSet.add(file)
+        }
+      }
+    }
+  }
+
+  return {
+    activityItems,
+    latestActivityItem: activityItems[activityItems.length - 1] ?? null,
+    patchFiles: [...patchFileSet].map((file) => ({
+      fullPath: file,
+      displayPath: formatPathTail(file, 4)
+    })),
+    renderableMessages
+  }
+})
+
+const renderableMessages = computed(() => messageAnalysis.value.renderableMessages)
+const activityItems = computed(() => messageAnalysis.value.activityItems)
+const latestActivityItem = computed(() => messageAnalysis.value.latestActivityItem)
+const patchFiles = computed(() => messageAnalysis.value.patchFiles)
 
 function clipActivityText(input: string, limit = 72) {
   const text = input.trim().replace(/\s+/g, ' ')
@@ -146,15 +169,34 @@ const workingBannerText = computed(() => {
 })
 
 function scrollToBottom() {
-  nextTick(() => {
-    if (streamEl.value) {
-      streamEl.value.scrollTop = streamEl.value.scrollHeight
-    }
+  if (scrollFrame) {
+    cancelAnimationFrame(scrollFrame)
+  }
+
+  scrollFrame = requestAnimationFrame(() => {
+    nextTick(() => {
+      if (streamEl.value) {
+        streamEl.value.scrollTop = streamEl.value.scrollHeight
+      }
+    })
   })
 }
 
+function updateStickiness() {
+  const element = streamEl.value
+  if (!element) {
+    return
+  }
+
+  shouldStickToBottom.value = element.scrollHeight - element.scrollTop - element.clientHeight < 72
+}
+
+function handleStreamScroll() {
+  updateStickiness()
+}
+
 watch(messageTailSignal, (value, previousValue) => {
-  if (!value || value === previousValue) {
+  if (!value || value === previousValue || !shouldStickToBottom.value) {
     return
   }
 
@@ -162,11 +204,22 @@ watch(messageTailSignal, (value, previousValue) => {
 })
 
 watch(showAgentWorking, (value, previousValue) => {
-  if (!value || value === previousValue) {
+  if (!value || value === previousValue || !shouldStickToBottom.value) {
     return
   }
 
   scrollToBottom()
+})
+
+onMounted(() => {
+  updateStickiness()
+  scrollToBottom()
+})
+
+onBeforeUnmount(() => {
+  if (scrollFrame) {
+    cancelAnimationFrame(scrollFrame)
+  }
 })
 </script>
 
@@ -209,7 +262,7 @@ watch(showAgentWorking, (value, previousValue) => {
       </div>
     </div>
 
-    <div ref="streamEl" class="chat-stream soft-scrollbar">
+    <div ref="streamEl" class="chat-stream soft-scrollbar" @scroll="handleStreamScroll">
       <div v-if="hasTruncatedMessages" class="chat-history-banner">
         <span class="chat-history-copy">仅加载最近 {{ historyLimit }} 条消息</span>
         <slot name="history-action" />

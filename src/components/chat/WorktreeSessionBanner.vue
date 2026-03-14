@@ -154,10 +154,11 @@ async function refreshStatuses() {
   pendingAction.value = 'status'
   localStatusError.value = ''
 
+  const shouldRefreshSessionInfo = !props.branch || !props.rootBranch || props.branchLoading || props.rootBranchLoading
   const [nextWorktreeStatus, nextRootStatus, nextSessionInfo] = await Promise.allSettled([
     getGitDirectoryStatus(props.worktreeDirectory),
     getGitDirectoryStatus(props.rootDirectory),
-    app.ensureSessionWorktreeInfo(props.sessionId)
+    shouldRefreshSessionInfo ? app.ensureSessionWorktreeInfo(props.sessionId) : Promise.resolve(null)
   ])
 
   if (nextWorktreeStatus.status === 'fulfilled') {
