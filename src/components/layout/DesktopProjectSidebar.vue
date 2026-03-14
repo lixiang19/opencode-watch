@@ -336,11 +336,11 @@ function getSessionPreviewState(session: SessionRecord) {
             <div class="project-copy">
               <div class="project-heading-row">
                 <strong>{{ group.name }}</strong>
-                <span class="project-time">{{ formatRelativeTime(group.lastUpdated) }}</span>
               </div>
               <div class="project-meta-row">
-                <span>{{ formatProjectDirectory(group.directory) }}</span>
-                <span>{{ group.sessionCount }} 个对话</span>
+                <span class="project-directory">{{ formatProjectDirectory(group.directory) }}</span>
+                <span class="project-meta-dot">·</span>
+                <span class="project-time">{{ formatRelativeTime(group.lastUpdated) }}</span>
               </div>
             </div>
 
@@ -382,7 +382,6 @@ function getSessionPreviewState(session: SessionRecord) {
           >
             <div class="session-row-top">
               <span class="session-title">{{ session.title || '未命名对话' }}</span>
-              <span class="session-time">{{ formatRelativeTime(session.time.updated || session.time.created) }}</span>
             </div>
 
             <div class="session-row-bottom">
@@ -401,6 +400,8 @@ function getSessionPreviewState(session: SessionRecord) {
                 >
                   {{ getSessionPreviewState(session).detailText }}
                 </span>
+                <span class="session-meta-dot">·</span>
+                <span class="session-time">{{ formatRelativeTime(session.time.updated || session.time.created) }}</span>
               </div>
 
               <div v-if="app.getSessionListBadges(session.id).length" class="session-badges">
@@ -481,7 +482,7 @@ function getSessionPreviewState(session: SessionRecord) {
 }
 
 .sidebar-header {
-  padding: 0 0 0.85rem;
+  padding: 0 0 0.65rem;
   border-bottom: 1px solid color-mix(in srgb, var(--border) 68%, transparent);
 }
 
@@ -527,8 +528,9 @@ function getSessionPreviewState(session: SessionRecord) {
 .sidebar-content {
   flex: 1;
   min-height: 0;
+  overflow-x: hidden;
   overflow-y: auto;
-  padding-right: 0.2rem;
+  padding-right: 0.1rem;
   scrollbar-width: thin;
   scrollbar-color: color-mix(in srgb, var(--primary) 18%, transparent) transparent;
 }
@@ -552,19 +554,18 @@ function getSessionPreviewState(session: SessionRecord) {
 }
 
 .project-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  display: flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.6rem 0;
+  gap: 0.35rem;
+  padding: 0.45rem 0;
 }
 
 .project-toggle {
-  display: grid;
+  display: flex;
   min-width: 0;
-  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: 0.75rem;
+  gap: 0.65rem;
+  flex: 0 1 auto;
   padding: 0;
   border: none;
   background: transparent;
@@ -575,8 +576,8 @@ function getSessionPreviewState(session: SessionRecord) {
 .project-icon-box {
   --project-icon-accent: var(--primary);
   display: flex;
-  width: 2.5rem;
-  height: 2.5rem;
+  width: 2.35rem;
+  height: 2.35rem;
   flex-shrink: 0;
   align-items: center;
   justify-content: center;
@@ -598,12 +599,10 @@ function getSessionPreviewState(session: SessionRecord) {
 .project-copy {
   display: grid;
   min-width: 0;
-  gap: 0.2rem;
+  gap: 0.12rem;
 }
 
 .project-heading-row,
-.project-meta-row,
-.session-row-top,
 .session-row-bottom {
   display: flex;
   align-items: center;
@@ -611,8 +610,11 @@ function getSessionPreviewState(session: SessionRecord) {
   gap: 0.75rem;
 }
 
-.project-heading-row strong,
-.session-title {
+.session-row-top {
+  display: block;
+}
+
+.project-heading-row strong {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -633,15 +635,24 @@ function getSessionPreviewState(session: SessionRecord) {
 }
 
 .project-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
   font-size: 0.76rem;
 }
 
-.project-meta-row span:first-child,
+.project-directory,
 .session-preview-text,
 .session-preview-detail {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-meta-dot,
+.project-time {
+  flex-shrink: 0;
   white-space: nowrap;
 }
 
@@ -669,6 +680,14 @@ function getSessionPreviewState(session: SessionRecord) {
   display: flex;
   align-items: center;
   gap: 0.2rem;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+
+.project-row:hover .project-create-actions {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .project-create-btn-worktree {
@@ -677,16 +696,16 @@ function getSessionPreviewState(session: SessionRecord) {
 
 .session-list {
   display: grid;
-  gap: 0.35rem;
-  padding: 0 0 0.75rem 3.25rem;
+  gap: 0.25rem;
+  padding: 0 0 0.45rem 0.28rem;
 }
 
 .session-row {
   display: grid;
-  gap: 0.35rem;
-  padding: 0.8rem 0.9rem;
+  gap: 0.18rem;
+  padding: 0.58rem 0.58rem;
   border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
-  border-radius: 1rem;
+  border-radius: 0.82rem;
   background: color-mix(in srgb, var(--card) 84%, transparent);
   text-align: left;
   transition: border-color 0.18s ease, background-color 0.18s ease, transform 0.18s ease;
@@ -704,15 +723,20 @@ function getSessionPreviewState(session: SessionRecord) {
 }
 
 .session-title {
-  font-size: 0.88rem;
+  min-width: 0;
+  flex: 1;
+  font-size: 0.85rem;
   font-weight: 600;
+  line-height: 1.25;
   color: var(--foreground);
+  white-space: normal;
+  word-break: break-word;
 }
 
 .session-time,
 .project-time {
   flex-shrink: 0;
-  font-size: 0.72rem;
+  font-size: 0.7rem;
 }
 
 .session-row-bottom {
@@ -724,8 +748,12 @@ function getSessionPreviewState(session: SessionRecord) {
   min-width: 0;
   flex: 1;
   align-items: center;
-  gap: 0.4rem;
-  font-size: 0.76rem;
+  gap: 0.28rem;
+  font-size: 0.72rem;
+}
+
+.session-meta-dot {
+  flex-shrink: 0;
 }
 
 .session-preview-working {
@@ -743,7 +771,7 @@ function getSessionPreviewState(session: SessionRecord) {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 0.25rem;
+  gap: 0.2rem;
 }
 
 .session-badge {

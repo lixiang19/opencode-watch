@@ -73,7 +73,7 @@ watch(
     :loading-older="app.isLoadingOlderMessages"
     :working-info="workingInfo"
   >
-    <template v-if="activeWorktreeInfo" #session-meta>
+    <template v-if="activeWorktreeInfo" #trailing>
       <WorktreeSessionBanner
         :session-id="activeWorktreeInfo.sessionId"
         :project-name="activeWorktreeInfo.projectName"

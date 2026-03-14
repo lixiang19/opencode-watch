@@ -207,8 +207,9 @@ watch(
               :working-info="getPanelWorkingInfo(session.id)"
               empty-text="暂无消息"
             >
-              <template v-if="getPanelWorktreeInfo(session.id)" #session-meta>
+              <template #trailing>
                 <WorktreeSessionBanner
+                  v-if="getPanelWorktreeInfo(session.id)"
                   :session-id="session.id"
                   :project-name="getPanelWorktreeInfo(session.id)?.projectName || ''"
                   :root-directory="getPanelWorktreeInfo(session.id)?.rootDirectory || ''"
@@ -221,9 +222,6 @@ watch(
                   :branch-error="getPanelWorktreeInfo(session.id)?.branchError || ''"
                   @removed="closePanel(session.id)"
                 />
-              </template>
-
-              <template #trailing>
                 <button type="button" class="chat-window-close" @click="closePanel(session.id)">
                   <X class="h-4 w-4" />
                 </button>
@@ -263,8 +261,9 @@ watch(
 <style scoped>
 .desktop-page {
   min-height: 100vh;
-  padding: 1rem;
-  overflow: auto;
+  padding: 0.6rem;
+  overflow-x: hidden;
+  overflow-y: auto;
   background:
     radial-gradient(circle at top left, color-mix(in srgb, var(--primary) 12%, transparent), transparent 24%),
     radial-gradient(circle at bottom right, color-mix(in srgb, var(--accent-foreground) 8%, transparent), transparent 22%),
@@ -286,16 +285,15 @@ watch(
 
 .desktop-shell {
   display: grid;
-  grid-template-columns: 25rem minmax(0, 1fr);
-  gap: 1.25rem;
-  min-width: 1360px;
-  height: calc(100vh - 2rem);
+  grid-template-columns: clamp(20.5rem, 23vw, 23rem) minmax(0, 1fr);
+  gap: 0.85rem;
+  height: calc(100vh - 1.2rem);
 }
 
 .desktop-sidebar {
   min-height: 0;
   overflow: hidden;
-  padding-right: 1rem;
+  padding-right: 0.55rem;
   border-right: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
 }
 

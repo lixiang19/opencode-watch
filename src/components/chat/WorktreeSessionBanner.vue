@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { Copy, GitBranch, GitMerge, LoaderCircle, Save, Trash2 } from 'lucide-vue-next'
+import { ChevronDown, Copy, GitBranch, GitMerge, LoaderCircle, Save, Trash2 } from 'lucide-vue-next'
 
 import Button from '@/components/ui/button/Button.vue'
 import Card from '@/components/ui/card/Card.vue'
@@ -42,6 +42,7 @@ const commitMessage = ref('')
 const localStatusError = ref('')
 const worktreeStatus = ref<GitDirectoryStatus | null>(null)
 const rootStatus = ref<GitDirectoryStatus | null>(null)
+const expanded = ref(false)
 
 const mergeCommand = computed(() => {
   if (!effectiveBranch.value) {
@@ -115,6 +116,24 @@ const rootStateText = computed(() => {
   return '主仓库工作区已干净'
 })
 
+const collapsedSummary = computed(() => {
+  if (localStatusError.value || props.rootBranchError || props.branchError) {
+    return '状态异常'
+  }
+
+  if (worktreeDirty.value) {
+    return `待提交 ${worktreeChangedCount.value}`
+  }
+
+  if (pendingAction.value === 'merge') {
+    return '合并中'
+  }
+
+  return '已就绪'
+})
+
+const collapsedDescription = computed(() => `${rootBranchLabel.value} ← ${branchLabel.value}`)
+
 watch(
   () => [props.sessionId, props.rootDirectory, props.worktreeDirectory].join('|'),
   () => {
@@ -184,6 +203,7 @@ async function mergeIntoRoot() {
   if (worktreeDirty.value) {
     seedCommitMessage()
     commitDialogOpen.value = true
+    expanded.value = true
     feedback.value = '当前 worktree 还有未提交改动，请先提交。'
     return
   }
@@ -192,6 +212,7 @@ async function mergeIntoRoot() {
   try {
     await mergeGitBranch(props.rootDirectory, effectiveBranch.value)
     await refreshStatuses()
+    expanded.value = true
     feedback.value = '已合并到主仓库当前分支'
   } catch (error) {
     feedback.value = error instanceof Error ? error.message : '合并失败，请在终端手动处理。'
@@ -230,6 +251,7 @@ async function commitWorktree() {
     await commitGitDirectory(props.worktreeDirectory, commitMessage.value.trim())
     commitDialogOpen.value = false
     await refreshStatuses()
+    expanded.value = true
     feedback.value = '当前 worktree 改动已提交'
   } catch (error) {
     if (error instanceof Error && error.message.includes('没有可提交的改动')) {
@@ -244,51 +266,66 @@ async function commitWorktree() {
 </script>
 
 <template>
-  <div class="worktree-banner">
-    <div class="worktree-copy">
-      <div class="worktree-title-row">
-        <span class="worktree-pill">Worktree 对话</span>
-        <span class="worktree-project">{{ projectName }}</span>
-      </div>
-      <div class="worktree-meta-row">
-        <GitBranch class="h-3.5 w-3.5" />
-        <span>{{ rootBranchLabel }} ← 合并 {{ branchLabel }}</span>
-      </div>
-      <div class="worktree-path-row">
-        <span>主仓库 {{ formatPathTail(rootDirectory, 3) }}</span>
-        <span>工作目录 {{ formatPathTail(worktreeDirectory, 4) }}</span>
-      </div>
-      <div class="worktree-status-row">
-        <span>{{ rootStateText }}</span>
-        <span>{{ worktreeStateText }}</span>
-      </div>
-      <p v-if="localStatusError" class="worktree-error">{{ localStatusError }}</p>
-      <p v-if="rootBranchError || branchError" class="worktree-error">{{ rootBranchError || branchError }}</p>
-      <p v-else class="worktree-tip">结束后回到主仓库执行合并，再删除 worktree。</p>
-    </div>
+  <div class="worktree-anchor">
+    <button type="button" class="worktree-trigger" :aria-expanded="expanded" @click="expanded = !expanded">
+      <GitBranch class="h-3.5 w-3.5" />
+      <span class="worktree-trigger-label">Worktree</span>
+      <span class="worktree-trigger-state">{{ collapsedSummary }}</span>
+      <ChevronDown class="h-3.5 w-3.5 worktree-trigger-chevron" :class="{ 'worktree-trigger-chevron-open': expanded }" />
+    </button>
 
-    <div class="worktree-actions">
-      <Button variant="outline" size="sm" :disabled="pendingAction === 'merge' || pendingAction === 'remove'" @click="seedCommitMessage(); commitDialogOpen = true">
-        <LoaderCircle v-if="pendingAction === 'commit'" class="h-3.5 w-3.5 animate-spin" />
-        <Save v-else class="h-3.5 w-3.5" />
-        {{ pendingAction === 'commit' ? '正在提交...' : '提交改动' }}
-      </Button>
-      <Button variant="outline" size="sm" :disabled="!mergeCommand || pendingAction === 'remove'" @click="mergeIntoRoot">
-        <LoaderCircle v-if="pendingAction === 'merge'" class="h-3.5 w-3.5 animate-spin" />
-        <GitMerge v-else class="h-3.5 w-3.5" />
-        {{ pendingAction === 'merge' ? '正在合并...' : '合并回主仓库' }}
-      </Button>
-      <Button variant="outline" size="sm" :disabled="pendingAction === 'merge'" @click="removeConfirmOpen = true">
-        <LoaderCircle v-if="pendingAction === 'remove'" class="h-3.5 w-3.5 animate-spin" />
-        <Trash2 v-else class="h-3.5 w-3.5" />
-        {{ pendingAction === 'remove' ? '正在删除...' : '删除 Worktree' }}
-      </Button>
-      <Button variant="ghost" size="sm" :disabled="!worktreeDirectory || !!pendingAction" @click="copyText('清理命令', cleanupCommand)">
-        <Copy class="h-3.5 w-3.5" />
-        复制命令
-      </Button>
+    <div v-if="expanded" class="worktree-panel">
+      <div class="worktree-panel-head">
+        <div class="worktree-title-row">
+          <span class="worktree-pill">Worktree 对话</span>
+          <span class="worktree-project">{{ projectName }}</span>
+        </div>
+        <div class="worktree-collapse-meta">
+          <span class="worktree-branch-inline">
+            <GitBranch class="h-3.5 w-3.5" />
+            {{ collapsedDescription }}
+          </span>
+          <span class="worktree-inline-path">{{ formatPathTail(worktreeDirectory, 3) }}</span>
+        </div>
+      </div>
+
+      <div class="worktree-copy">
+        <div class="worktree-path-row">
+          <span>主仓库 {{ formatPathTail(rootDirectory, 3) }}</span>
+          <span>工作目录 {{ formatPathTail(worktreeDirectory, 4) }}</span>
+        </div>
+        <div class="worktree-status-row">
+          <span>{{ rootStateText }}</span>
+          <span>{{ worktreeStateText }}</span>
+        </div>
+        <p v-if="localStatusError" class="worktree-error">{{ localStatusError }}</p>
+        <p v-if="rootBranchError || branchError" class="worktree-error">{{ rootBranchError || branchError }}</p>
+        <p v-else class="worktree-tip">结束后回到主仓库执行合并，再删除 worktree。</p>
+      </div>
+
+      <div class="worktree-actions">
+        <Button variant="outline" size="sm" :disabled="pendingAction === 'merge' || pendingAction === 'remove'" @click="seedCommitMessage(); commitDialogOpen = true">
+          <LoaderCircle v-if="pendingAction === 'commit'" class="h-3.5 w-3.5 animate-spin" />
+          <Save v-else class="h-3.5 w-3.5" />
+          {{ pendingAction === 'commit' ? '正在提交...' : '提交改动' }}
+        </Button>
+        <Button variant="outline" size="sm" :disabled="!mergeCommand || pendingAction === 'remove'" @click="mergeIntoRoot">
+          <LoaderCircle v-if="pendingAction === 'merge'" class="h-3.5 w-3.5 animate-spin" />
+          <GitMerge v-else class="h-3.5 w-3.5" />
+          {{ pendingAction === 'merge' ? '正在合并...' : '合并回主仓库' }}
+        </Button>
+        <Button variant="outline" size="sm" :disabled="pendingAction === 'merge'" @click="removeConfirmOpen = true">
+          <LoaderCircle v-if="pendingAction === 'remove'" class="h-3.5 w-3.5 animate-spin" />
+          <Trash2 v-else class="h-3.5 w-3.5" />
+          {{ pendingAction === 'remove' ? '正在删除...' : '删除 Worktree' }}
+        </Button>
+        <Button variant="ghost" size="sm" :disabled="!worktreeDirectory || !!pendingAction" @click="copyText('清理命令', cleanupCommand)">
+          <Copy class="h-3.5 w-3.5" />
+          复制命令
+        </Button>
+      </div>
+      <p v-if="feedback" class="worktree-feedback">{{ feedback }}</p>
     </div>
-    <p v-if="feedback" class="worktree-feedback">{{ feedback }}</p>
 
     <div v-if="removeConfirmOpen" class="worktree-confirm" role="dialog" aria-modal="true" aria-labelledby="worktree-remove-title">
       <div class="worktree-confirm-backdrop" @click="removeConfirmOpen = false" />
@@ -338,28 +375,82 @@ async function commitWorktree() {
 </template>
 
 <style scoped>
-.worktree-banner {
-  display: flex;
-  flex-wrap: wrap;
+.worktree-anchor {
+  position: relative;
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
+.worktree-trigger {
+  display: inline-flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 0.38rem;
+  height: 2rem;
+  padding: 0 0.72rem;
+  border: 1px solid color-mix(in srgb, var(--primary) 18%, var(--border));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--card) 96%, transparent);
+  color: color-mix(in srgb, var(--primary) 68%, var(--foreground));
+  font-size: 0.76rem;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 8px 20px -18px color-mix(in srgb, var(--foreground) 42%, transparent);
+}
+
+.worktree-trigger-label {
+  white-space: nowrap;
+}
+
+.worktree-trigger-state {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.1rem 0.38rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--foreground) 7%, transparent);
+  color: var(--muted-foreground);
+  font-size: 0.68rem;
+  font-weight: 600;
+}
+
+.worktree-trigger-chevron {
+  color: var(--muted-foreground);
+  transition: transform 0.18s ease;
+}
+
+.worktree-trigger-chevron-open {
+  transform: rotate(180deg);
+}
+
+.worktree-panel {
+  position: absolute;
+  top: calc(100% + 0.55rem);
+  right: 0;
+  z-index: 30;
+  display: grid;
   gap: 0.75rem;
-  padding: 0.85rem 1rem;
-  border: 1px solid color-mix(in srgb, var(--primary) 24%, var(--border));
+  width: min(28rem, calc(100vw - 2rem));
+  padding: 0.9rem;
+  border: 1px solid color-mix(in srgb, var(--primary) 18%, var(--border));
   border-radius: 1rem;
   background:
-    linear-gradient(135deg, color-mix(in srgb, var(--primary) 8%, transparent), transparent 65%),
-    color-mix(in srgb, var(--card) 94%, transparent);
+    linear-gradient(180deg, color-mix(in srgb, var(--primary) 5%, transparent), transparent 52%),
+    var(--card);
+  box-shadow: 0 18px 40px -26px color-mix(in srgb, var(--foreground) 52%, transparent);
+}
+
+.worktree-panel-head {
+  display: grid;
+  gap: 0.35rem;
 }
 
 .worktree-copy {
   display: grid;
-  gap: 0.35rem;
+  gap: 0.45rem;
   min-width: 0;
 }
 
 .worktree-title-row,
-.worktree-meta-row,
+.worktree-collapse-meta,
 .worktree-path-row,
 .worktree-status-row,
 .worktree-actions {
@@ -372,20 +463,48 @@ async function commitWorktree() {
 .worktree-pill {
   display: inline-flex;
   align-items: center;
-  padding: 0.18rem 0.5rem;
+  padding: 0.22rem 0.56rem;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--primary) 12%, transparent);
-  color: color-mix(in srgb, var(--primary) 82%, var(--foreground));
+  background: color-mix(in srgb, var(--primary) 14%, transparent);
+  color: color-mix(in srgb, var(--primary) 76%, var(--foreground));
   font-size: 0.72rem;
   font-weight: 700;
 }
 
 .worktree-project {
-  font-size: 0.78rem;
+  font-size: 0.8rem;
+  font-weight: 600;
   color: var(--muted-foreground);
 }
 
-.worktree-meta-row,
+.worktree-summary-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.18rem 0.5rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--foreground) 7%, transparent);
+  color: var(--muted-foreground);
+  font-size: 0.71rem;
+  font-weight: 600;
+}
+
+.worktree-branch-inline,
+.worktree-inline-path {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.worktree-inline-path {
+  opacity: 0.82;
+}
+
+.worktree-collapse-toggle {
+  display: none;
+}
+
+.worktree-collapse-meta,
 .worktree-path-row,
 .worktree-status-row,
 .worktree-tip,
@@ -399,7 +518,6 @@ async function commitWorktree() {
 }
 
 .worktree-feedback {
-  width: 100%;
   margin: 0;
   font-size: 0.78rem;
   color: color-mix(in srgb, var(--primary) 80%, var(--foreground));
@@ -473,11 +591,36 @@ async function commitWorktree() {
 }
 
 @media (max-width: 720px) {
-  .worktree-banner {
-    padding: 0.8rem 0.9rem;
+  .worktree-trigger {
+    padding-inline: 0.62rem;
+  }
+
+  .worktree-title-row,
+  .worktree-collapse-meta,
+  .worktree-status-row,
+  .worktree-actions {
+    gap: 0.4rem;
   }
 
   .worktree-actions {
+    width: 100%;
+  }
+
+  .worktree-panel {
+    position: fixed;
+    top: calc(env(safe-area-inset-top) + 4.25rem);
+    right: 0.8rem;
+    left: 0.8rem;
+    width: auto;
+    max-height: min(70vh, 34rem);
+    overflow: auto;
+  }
+
+  .worktree-summary-pill {
+    order: 3;
+  }
+
+  .worktree-inline-path {
     width: 100%;
   }
 
