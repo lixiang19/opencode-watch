@@ -7,9 +7,12 @@ import {
   FolderOpen,
   Info,
   Link2,
+  Monitor,
+  Moon,
   RefreshCw,
   ShieldCheck,
   Smartphone,
+  Sun,
   User
 } from 'lucide-vue-next'
 
@@ -17,8 +20,16 @@ import Button from '@/components/ui/button/Button.vue'
 import Input from '@/components/ui/input/Input.vue'
 import Card from '@/components/ui/card/Card.vue'
 import { useOpencodeStore } from '@/stores/opencode'
+import { useTheme, type ThemePreference } from '@/composables/useTheme'
 
 const app = useOpencodeStore()
+const { preference: themePreference, setTheme } = useTheme()
+
+const themeOptions: { value: ThemePreference; label: string; icon: typeof Sun }[] = [
+  { value: 'system', label: '跟随系统', icon: Monitor },
+  { value: 'light', label: '浅色', icon: Sun },
+  { value: 'dark', label: '深色', icon: Moon }
+]
 
 const connectionTone = computed(() => (app.streamReady ? 'status-ok' : 'status-error'))
 const serverEndpoint = computed(() => {
@@ -295,6 +306,29 @@ const installStatusText = computed(() => {
                 <CircleAlert class="h-4 w-4 mr-2" />
                 退出管理登录
               </Button>
+            </div>
+          </div>
+        </Card>
+
+        <!-- 外观设置 -->
+        <Card class="form-card">
+          <div class="form-section">
+            <div class="section-header">
+              <Sun class="h-4 w-4" />
+              <span>外观</span>
+            </div>
+            <div class="theme-switcher">
+              <button
+                v-for="opt in themeOptions"
+                :key="opt.value"
+                type="button"
+                class="theme-option"
+                :class="{ 'theme-option-active': themePreference === opt.value }"
+                @click="setTheme(opt.value)"
+              >
+                <component :is="opt.icon" class="h-4 w-4" />
+                <span>{{ opt.label }}</span>
+              </button>
             </div>
           </div>
         </Card>
@@ -629,6 +663,40 @@ const installStatusText = computed(() => {
   color: var(--muted-foreground);
   font-size: 0.8125rem;
   line-height: 1.6;
+}
+
+/* 主题切换 */
+.theme-switcher {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.65rem;
+}
+
+.theme-option {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 1rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 0.875rem;
+  background: var(--card);
+  color: var(--muted-foreground);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+
+.theme-option:hover {
+  border-color: color-mix(in srgb, var(--primary) 30%, var(--border));
+  background: color-mix(in srgb, var(--primary) 4%, var(--card));
+}
+
+.theme-option-active {
+  border-color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 8%, var(--card));
+  color: var(--foreground);
 }
 
 /* 错误日志 */

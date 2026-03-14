@@ -186,7 +186,7 @@ watch(
 </script>
 
 <template>
-  <div class="desktop-page">
+  <div class="desktop-page vercel-theme">
       <div class="desktop-note">
         <Sparkles class="h-4 w-4" />
         <span>PC 左侧改成项目树，只在项目下面展示历史对话。</span>
@@ -298,46 +298,48 @@ watch(
 <style scoped>
 .desktop-page {
   min-height: 100vh;
-  padding: 0.6rem;
+  padding: 0;
   overflow-x: hidden;
   overflow-y: auto;
-  background:
-    radial-gradient(circle at top left, color-mix(in srgb, var(--primary) 12%, transparent), transparent 24%),
-    radial-gradient(circle at bottom right, color-mix(in srgb, var(--accent-foreground) 8%, transparent), transparent 22%),
-    var(--background);
+  background: var(--background);
   color: var(--foreground);
+  font-family: var(--font-sans);
+  font-size: 0.875rem;
 }
 
 .desktop-note {
   display: none;
   align-items: center;
   gap: 0.5rem;
-  margin-bottom: 0.75rem;
-  padding: 0.875rem 1rem;
-  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
-  border-radius: 1rem;
-  background: color-mix(in srgb, var(--card) 92%, transparent);
+  padding: 0.6rem 1rem;
+  border-bottom: 1px solid var(--border);
   color: var(--muted-foreground);
+  font-size: 0.75rem;
 }
 
 .desktop-shell {
-  --desktop-panel-height: calc(100dvh - 1.2rem);
+  --desktop-panel-height: 100dvh;
+  --sidebar-width: clamp(18rem, 20vw, 22rem);
   display: grid;
-  grid-template-columns: clamp(20.5rem, 23vw, 23rem) minmax(0, 1fr);
-  gap: 0.85rem;
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+  gap: 0;
   height: var(--desktop-panel-height);
 }
 
 .desktop-sidebar {
   min-height: 0;
   overflow: hidden;
-  padding-right: 0.55rem;
-  border-right: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  padding: 0;
+  border-right: 1px solid var(--border);
+  background: var(--card);
+  display: flex;
+  flex-direction: column;
 }
 
 .desktop-chat-stage {
   height: 100%;
   min-height: 0;
+  background: var(--background);
 }
 
 .chat-grid-item {
@@ -346,6 +348,7 @@ watch(
   height: var(--desktop-panel-height);
   min-width: 0;
   align-self: start;
+  border-right: 1px solid var(--border);
 }
 
 .chat-grid-item > * {
@@ -358,6 +361,7 @@ watch(
   height: 100%;
   width: 100%;
   min-width: 0;
+  border-radius: 0 !important;
 }
 
 .chat-grid {
@@ -365,29 +369,38 @@ watch(
   grid-template-columns: repeat(3, minmax(0, 1fr));
   align-content: start;
   align-items: start;
-  gap: 1rem;
+  gap: 0;
   height: 100%;
   overflow-y: auto;
 }
 
 .chat-window-close {
-  display: grid;
-  width: 2rem;
-  height: 2rem;
-  place-items: center;
-  border: 1px solid var(--border);
-  border-radius: 0.8rem;
-  background: var(--background);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: var(--radius);
+  background: transparent;
   color: var(--muted-foreground);
+  border: none;
+  transition: color 0.1s ease, background 0.1s ease;
+  flex-shrink: 0;
 }
 
+.chat-window-close:hover {
+  background: var(--secondary);
+  color: var(--foreground);
+}
+
+/* Loading placeholder */
 .chat-window-placeholder {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
   height: 100%;
-  border: 1px solid var(--border);
-  border-radius: 1.5rem;
-  background: var(--card);
+  border: none;
+  border-radius: 0;
+  background: var(--background);
   overflow: hidden;
 }
 
@@ -396,79 +409,88 @@ watch(
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
-  padding: 0.95rem 1rem 0.85rem;
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
-  background: color-mix(in srgb, var(--card) 96%, transparent);
+  padding: 0 1rem;
+  height: 3rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.chat-window-copy {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+  flex: 1;
+}
+
+.chat-window-copy strong {
+  color: var(--foreground);
+  font-weight: 500;
+  font-size: 0.8rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chat-window-copy span {
+  color: var(--muted-foreground);
+  font-size: 0.72rem;
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chat-window-copy span::before {
+  content: '/ ';
+  opacity: 0.4;
 }
 
 .chat-window-placeholder-body {
   display: flex;
   flex-direction: column;
-  gap: 0.9rem;
-  padding: 1rem;
+  gap: 1.25rem;
+  padding: 1.5rem 1rem;
 }
 
 .placeholder-pill {
   display: inline-flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.45rem;
   width: fit-content;
-  padding: 0.65rem 0.85rem;
+  padding: 0.35rem 0.6rem;
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius);
   color: var(--muted-foreground);
-  background: color-mix(in srgb, var(--muted) 32%, transparent);
-  font-size: 0.82rem;
+  background: transparent;
+  font-size: 0.75rem;
 }
 
 .placeholder-bubble {
-  height: 3.25rem;
-  border-radius: 1rem;
-  background: linear-gradient(
-    90deg,
-    color-mix(in srgb, var(--muted) 56%, transparent),
-    color-mix(in srgb, var(--background) 90%, transparent),
-    color-mix(in srgb, var(--muted) 56%, transparent)
-  );
-  background-size: 220% 100%;
-  animation: placeholder-shimmer 1.2s linear infinite;
+  height: 0.875rem;
+  border-radius: 2px;
+  background: var(--secondary);
+  opacity: 0.6;
 }
 
-.placeholder-bubble-short {
-  width: 48%;
-}
-
-.placeholder-bubble-mid {
-  width: 56%;
-}
-
-.placeholder-bubble-long {
-  width: 76%;
-}
-
-.placeholder-bubble-right {
-  margin-left: auto;
-}
+.placeholder-bubble-short { width: 38%; }
+.placeholder-bubble-mid   { width: 54%; }
+.placeholder-bubble-long  { width: 72%; }
+.placeholder-bubble-right { margin-left: auto; opacity: 0.4; }
 
 .chat-window-placeholder-composer {
-  padding: 0 0.875rem 0.875rem;
-  border-top: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  padding: 0.75rem 1rem;
+  border-top: 1px solid var(--border);
 }
 
 .placeholder-composer {
-  height: 5.75rem;
+  height: 2.5rem;
   border: 1px solid var(--border);
-  border-radius: 1.5rem;
-  background: linear-gradient(
-    90deg,
-    color-mix(in srgb, var(--muted) 48%, transparent),
-    color-mix(in srgb, var(--background) 90%, transparent),
-    color-mix(in srgb, var(--muted) 48%, transparent)
-  );
-  background-size: 220% 100%;
-  animation: placeholder-shimmer 1.2s linear infinite;
+  border-radius: var(--radius);
+  background: var(--secondary);
+  opacity: 0.5;
 }
 
+/* Empty state */
 .desktop-empty-stage {
   display: grid;
   height: 100%;
@@ -477,34 +499,26 @@ watch(
 
 .desktop-empty-card {
   display: grid;
-  gap: 0.55rem;
+  gap: 0.5rem;
   place-items: center;
-  padding: 2rem;
-  border: 1px solid color-mix(in srgb, var(--border) 76%, transparent);
-  border-radius: 1.5rem;
-  background: color-mix(in srgb, var(--card) 94%, transparent);
+  padding: 2.5rem 3rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
   color: var(--muted-foreground);
   text-align: center;
 }
 
 .desktop-empty-card strong {
   color: var(--foreground);
+  font-size: 0.875rem;
+  font-weight: 500;
 }
 
 .desktop-empty-card p {
   margin: 0;
-  max-width: 24rem;
+  max-width: 22rem;
   line-height: 1.6;
-}
-
-@keyframes placeholder-shimmer {
-  0% {
-    background-position: 200% 0;
-  }
-
-  100% {
-    background-position: -20% 0;
-  }
+  font-size: 0.8rem;
 }
 
 @media (max-width: 1100px) {

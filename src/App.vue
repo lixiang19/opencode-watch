@@ -2,6 +2,9 @@
 import { RouterView } from 'vue-router'
 
 import AuthGateDialog from '@/components/auth/AuthGateDialog.vue'
+import { useTheme } from '@/composables/useTheme'
+
+useTheme()
 </script>
 
 <template>

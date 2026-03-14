@@ -269,10 +269,10 @@ async function commitWorktree() {
 <template>
   <div class="worktree-anchor">
     <button type="button" class="worktree-trigger" :aria-expanded="expanded" @click="expanded = !expanded">
-      <GitBranch class="h-3.5 w-3.5" />
+      <GitBranch class="h-3 w-3 worktree-trigger-icon" />
       <span class="worktree-trigger-label">Worktree</span>
       <span class="worktree-trigger-state">{{ collapsedSummary }}</span>
-      <ChevronDown class="h-3.5 w-3.5 worktree-trigger-chevron" :class="{ 'worktree-trigger-chevron-open': expanded }" />
+      <ChevronDown class="h-3 w-3 worktree-trigger-chevron" :class="{ 'worktree-trigger-chevron-open': expanded }" />
     </button>
 
     <div v-if="expanded" class="worktree-panel">
@@ -385,58 +385,68 @@ async function commitWorktree() {
 .worktree-trigger {
   display: inline-flex;
   align-items: center;
-  gap: 0.38rem;
-  height: 2rem;
-  padding: 0 0.72rem;
-  border: 1px solid color-mix(in srgb, var(--primary) 18%, var(--border));
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--card) 96%, transparent);
-  color: color-mix(in srgb, var(--primary) 68%, var(--foreground));
-  font-size: 0.76rem;
-  font-weight: 700;
+  gap: 0.35rem;
+  height: 1.75rem;
+  padding: 0 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--secondary);
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+  font-family: var(--font-sans);
+  font-weight: 400;
   cursor: pointer;
-  box-shadow: 0 8px 20px -18px color-mix(in srgb, var(--foreground) 42%, transparent);
+  transition: background 0.1s, color 0.1s, border-color 0.1s;
 }
 
+.worktree-trigger:hover {
+  background: var(--accent);
+  color: var(--foreground);
+  border-color: color-mix(in srgb, var(--foreground) 15%, transparent);
+}
+
+.worktree-trigger-icon { color: var(--muted-foreground); flex-shrink: 0; }
+
 .worktree-trigger-label {
+  color: var(--foreground);
+  font-weight: 500;
   white-space: nowrap;
 }
 
 .worktree-trigger-state {
   display: inline-flex;
   align-items: center;
-  padding: 0.1rem 0.38rem;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--foreground) 7%, transparent);
+  padding: 0.05rem 0.32rem;
+  border: 1px solid var(--border);
+  border-radius: 9999px;
   color: var(--muted-foreground);
-  font-size: 0.68rem;
-  font-weight: 600;
+  font-size: 0.65rem;
+  background: transparent;
 }
 
 .worktree-trigger-chevron {
   color: var(--muted-foreground);
-  transition: transform 0.18s ease;
+  transition: transform 0.15s ease;
+  flex-shrink: 0;
 }
 
-.worktree-trigger-chevron-open {
-  transform: rotate(180deg);
-}
+.worktree-trigger-chevron-open { transform: rotate(180deg); }
 
 .worktree-panel {
   position: absolute;
-  top: calc(100% + 0.55rem);
+  top: calc(100% + 0.4rem);
   right: 0;
   z-index: 30;
   display: grid;
   gap: 0.75rem;
   width: min(28rem, calc(100vw - 2rem));
-  padding: 0.9rem;
-  border: 1px solid color-mix(in srgb, var(--primary) 18%, var(--border));
-  border-radius: 1rem;
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--primary) 5%, transparent), transparent 52%),
-    var(--card);
-  box-shadow: 0 18px 40px -26px color-mix(in srgb, var(--foreground) 52%, transparent);
+  padding: 0.875rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--popover);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+  font-family: var(--font-sans);
+  font-size: 0.8rem;
 }
 
 .worktree-panel-head {
@@ -464,12 +474,13 @@ async function commitWorktree() {
 .worktree-pill {
   display: inline-flex;
   align-items: center;
-  padding: 0.22rem 0.56rem;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--primary) 14%, transparent);
-  color: color-mix(in srgb, var(--primary) 76%, var(--foreground));
-  font-size: 0.72rem;
-  font-weight: 700;
+  padding: 0.1rem 0.4rem;
+  border-radius: 9999px;
+  border: 1px solid var(--border);
+  background: var(--secondary);
+  color: var(--foreground);
+  font-size: 0.7rem;
+  font-weight: 500;
 }
 
 .worktree-project {
@@ -544,8 +555,12 @@ async function commitWorktree() {
 .worktree-confirm-card {
   position: relative;
   width: min(100%, 28rem);
-  padding: 1rem;
-  border-radius: 1.25rem;
+  padding: 1.25rem;
+  border-radius: var(--radius);
+  font-family: var(--font-sans);
+  background: var(--popover);
+  border: 1px solid var(--border);
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5);
 }
 
 .worktree-confirm-card h3,

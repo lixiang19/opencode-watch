@@ -8,7 +8,8 @@ export const STORAGE_KEYS = {
   selectionMigration: 'opencode-mobile-web-chat.selection-migration',
   selectedAgent: 'opencode-mobile-web-chat.selected-agent',
   selectedModel: 'opencode-mobile-web-chat.selected-model',
-  selectedVariant: 'opencode-mobile-web-chat.selected-variant'
+  selectedVariant: 'opencode-mobile-web-chat.selected-variant',
+  theme: 'opencode-mobile-web-chat.theme'
 } as const
 
 export const RECENT_PROJECT_WINDOW = 7 * 24 * 60 * 60 * 1000

@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { ChevronRight, FolderOpenDot, GitBranchPlus, LoaderCircle, MessageCirclePlus } from 'lucide-vue-next'
+import { useRouter } from 'vue-router'
+import { FolderOpenDot, GitBranchPlus, LoaderCircle, MessageCirclePlus, Settings } from 'lucide-vue-next'
 
-import Badge from '@/components/ui/badge/Badge.vue'
 import Button from '@/components/ui/button/Button.vue'
 import WorktreeCreateDialog from '@/components/chat/WorktreeCreateDialog.vue'
 import { PROJECT_SESSION_PAGE_SIZE } from '@/composables/useOpencodeApp/constants'
@@ -47,6 +47,7 @@ const ICON_COLOR_VALUES: Record<string, string> = {
   lime: '#7aac20'
 }
 
+const router = useRouter()
 const app = useOpencodeStore()
 const expandedProjectKeys = ref<string[]>([])
 const projectLoadState = ref<Record<string, boolean>>({})
@@ -169,6 +170,11 @@ function formatProjectDirectory(directory: string) {
 
 function getProjectInitial(name: string) {
   return name.slice(0, 1).toUpperCase()
+}
+
+function getProjectCode(name: string) {
+  const cleaned = name.replace(/[^a-zA-Z0-9\u4e00-\u9fa5]/g, '')
+  return cleaned.slice(0, 2).toUpperCase() || name.slice(0, 2).toUpperCase()
 }
 
 function getProjectIconSrc(group: ProjectSessionGroup) {
@@ -320,10 +326,7 @@ const sessionRowState = computed(() => {
   <div class="desktop-project-sidebar">
     <header class="sidebar-header">
       <div class="sidebar-title-row">
-        <div class="sidebar-title-block">
-          <h1>项目</h1>
-          <p>点击项目名展开历史对话</p>
-        </div>
+        <span class="sidebar-label">Projects</span>
         <span v-if="projectGroups.length" class="sidebar-count">{{ projectGroups.length }}</span>
       </div>
     </header>
@@ -353,8 +356,9 @@ const sessionRowState = computed(() => {
               </div>
             </div>
 
-            <ChevronRight class="project-chevron" :class="{ 'project-chevron-expanded': isExpanded(group.key) }" />
           </button>
+
+          <svg class="project-chevron" :class="{ 'project-chevron-expanded': isExpanded(group.key) }" width="12" height="12" viewBox="0 0 12 12" fill="none" @click="toggleProject(group)"><path d="M4.5 3L7.5 6L4.5 9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
 
           <div v-if="!group.unbound" class="project-create-actions">
             <Button
@@ -392,7 +396,7 @@ const sessionRowState = computed(() => {
             <div class="session-row-top">
               <div class="session-title-row">
                 <span class="session-title">{{ session.title || '未命名对话' }}</span>
-                <Badge v-if="sessionRowState[session.id]?.isWorktree" tone="accent" class="worktree-badge">Worktree</Badge>
+                <span v-if="sessionRowState[session.id]?.isWorktree" class="worktree-badge">wt</span>
               </div>
             </div>
 
@@ -417,14 +421,14 @@ const sessionRowState = computed(() => {
               </div>
 
               <div v-if="sessionRowState[session.id]?.badges.length" class="session-badges">
-                <Badge
+                <span
                   v-for="badge in sessionRowState[session.id]?.badges"
                   :key="badge.key"
-                  :tone="badge.tone"
                   class="session-badge"
+                  :data-tone="badge.tone"
                 >
                   {{ badge.label }}
-                </Badge>
+                </span>
               </div>
             </div>
           </button>
@@ -473,6 +477,13 @@ const sessionRowState = computed(() => {
       <p>先在手机端项目页选择目录，或等已有会话同步后，这里会按项目归档显示。</p>
     </div>
 
+    <footer class="sidebar-footer">
+      <button type="button" class="sidebar-footer-btn" @click="router.push('/settings')">
+        <Settings class="h-4 w-4" />
+        <span>Settings</span>
+      </button>
+    </footer>
+
     <WorktreeCreateDialog
       v-model:open="worktreeDialogOpen"
       :busy="isCreatingWorktree"
@@ -485,121 +496,113 @@ const sessionRowState = computed(() => {
 </template>
 
 <style scoped>
+/* ── Sidebar container ── */
 .desktop-project-sidebar {
   display: flex;
   height: 100%;
   min-height: 0;
   flex-direction: column;
-  background: transparent;
+  background: var(--card);
+  font-family: var(--font-sans);
+  font-size: 0.8125rem;
 }
 
+/* ── Header ── */
 .sidebar-header {
-  padding: 0 0 0.65rem;
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 68%, transparent);
+  height: 3rem;
+  padding: 0 1rem;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
 }
 
 .sidebar-title-row {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
-  gap: 0.75rem;
+  width: 100%;
 }
 
-.sidebar-title-block {
-  display: grid;
-  gap: 0.3rem;
-}
-
-.sidebar-title-block h1 {
-  margin: 0;
-  font-size: 1rem;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-}
-
-.sidebar-title-block p {
-  margin: 0;
-  font-size: 0.78rem;
+.sidebar-label {
+  font-size: 0.75rem;
+  font-weight: 500;
   color: var(--muted-foreground);
+  letter-spacing: 0.01em;
 }
 
 .sidebar-count {
-  display: inline-flex;
-  min-width: 1.85rem;
-  align-items: center;
-  justify-content: center;
-  padding: 0.2rem 0.55rem;
-  border: 1px solid color-mix(in srgb, var(--primary) 25%, transparent);
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--primary) 12%, transparent);
-  color: var(--primary);
-  font-size: 0.7rem;
-  font-weight: 700;
+  font-size: 0.72rem;
+  color: var(--muted-foreground);
+  background: var(--secondary);
+  padding: 0.1rem 0.4rem;
+  border-radius: 9999px;
+  border: 1px solid var(--border);
 }
 
+/* ── Scrollable content ── */
 .sidebar-content {
   flex: 1;
   min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;
-  padding-right: 0.1rem;
   scrollbar-width: thin;
-  scrollbar-color: color-mix(in srgb, var(--primary) 18%, transparent) transparent;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
 }
 
-.sidebar-content::-webkit-scrollbar {
-  -webkit-appearance: none;
-  width: 2px;
-}
-
-.sidebar-content::-webkit-scrollbar-track {
-  background: transparent;
-}
-
+.sidebar-content::-webkit-scrollbar { width: 2px; }
+.sidebar-content::-webkit-scrollbar-track { background: transparent; }
 .sidebar-content::-webkit-scrollbar-thumb {
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--primary) 18%, transparent);
+  background: var(--scrollbar-thumb);
+  border-radius: 9999px;
 }
 
+/* ── Project group ── */
 .project-group {
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 62%, transparent);
+  border-bottom: 1px solid var(--border);
 }
 
 .project-row {
   display: flex;
   align-items: center;
   gap: 0.35rem;
-  padding: 0.45rem 0;
+  padding: 0 0.75rem;
+  min-height: 2.75rem;
 }
 
 .project-toggle {
   display: flex;
   min-width: 0;
+  flex: 1;
   align-items: center;
-  gap: 0.65rem;
-  flex: 0 1 auto;
-  padding: 0;
+  gap: 0.6rem;
+  padding: 0.5rem 0;
   border: none;
   background: transparent;
   color: inherit;
   text-align: left;
+  cursor: pointer;
+  transition: opacity 0.1s;
+  overflow: hidden;
 }
 
+.project-toggle:hover { opacity: 0.8; }
+
 .project-icon-box {
-  --project-icon-accent: var(--primary);
+  --project-icon-accent: var(--muted-foreground);
   display: flex;
-  width: 2.35rem;
-  height: 2.35rem;
+  width: 1.625rem;
+  height: 1.625rem;
   flex-shrink: 0;
   align-items: center;
   justify-content: center;
   overflow: hidden;
-  border-radius: 0.8rem;
-  background: var(--project-icon-accent);
-  color: var(--primary-foreground);
-  font-size: 1rem;
-  font-weight: 800;
-  box-shadow: 0 8px 18px -12px color-mix(in srgb, var(--project-icon-accent) 55%, transparent);
+  border-radius: var(--radius);
+  background: var(--secondary);
+  color: var(--project-icon-accent);
+  font-size: 0.7rem;
+  font-weight: 600;
+  border: 1px solid var(--border);
 }
 
 .project-icon-image {
@@ -611,28 +614,14 @@ const sessionRowState = computed(() => {
 .project-copy {
   display: grid;
   min-width: 0;
-  gap: 0.12rem;
+  flex: 1;
+  gap: 0.08rem;
 }
 
-.project-heading-row,
-.session-row-bottom {
+.project-heading-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-}
-
-.session-row-top {
-  display: flex;
-  align-items: flex-start;
   gap: 0.5rem;
-}
-
-.session-title-row {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  min-width: 0;
 }
 
 .project-heading-row strong {
@@ -640,26 +629,17 @@ const sessionRowState = computed(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.project-heading-row strong {
-  font-size: 0.94rem;
-  font-weight: 700;
-}
-
-.project-meta-row,
-.project-time,
-.session-time,
-.session-preview,
-.session-preview-detail {
-  color: var(--muted-foreground);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--foreground);
 }
 
 .project-meta-row {
   display: flex;
   align-items: center;
-  gap: 0.35rem;
-  font-size: 0.76rem;
+  gap: 0.3rem;
+  font-size: 0.7rem;
+  color: var(--muted-foreground);
 }
 
 .project-directory,
@@ -669,41 +649,41 @@ const sessionRowState = computed(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-family: var(--font-mono);
 }
 
 .project-meta-dot,
-.project-time {
+.project-time,
+.session-meta-dot,
+.session-time {
   flex-shrink: 0;
   white-space: nowrap;
 }
 
+.project-time,
+.session-time { color: var(--muted-foreground); }
+
 .project-chevron {
-  width: 1rem;
-  height: 1rem;
   flex-shrink: 0;
   color: var(--muted-foreground);
-  transition: transform 0.18s ease;
+  cursor: pointer;
+  transition: transform 0.15s ease;
 }
 
-.project-chevron-expanded {
-  transform: rotate(90deg);
-}
+.project-chevron:hover { color: var(--foreground); }
 
-.project-create-btn {
-  height: 2rem;
-  min-width: 2rem;
-  padding: 0;
-  border-radius: 0.8rem;
-  color: var(--muted-foreground);
-}
+.project-chevron-expanded { transform: rotate(90deg); }
 
+/* Action buttons */
 .project-create-actions {
   display: flex;
   align-items: center;
-  gap: 0.2rem;
+  gap: 0.15rem;
+  flex-shrink: 0;
+  margin-left: auto;
   opacity: 0;
   pointer-events: none;
-  transition: opacity 0.15s ease;
+  transition: opacity 0.1s;
 }
 
 .project-row:hover .project-create-actions {
@@ -711,99 +691,111 @@ const sessionRowState = computed(() => {
   pointer-events: auto;
 }
 
-.project-create-btn-worktree {
-  color: color-mix(in srgb, var(--primary) 72%, var(--foreground));
+.project-create-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 1.625rem;
+  width: 1.625rem;
+  min-width: 1.625rem;
+  padding: 0;
+  border-radius: var(--radius);
+  color: var(--muted-foreground);
 }
 
+.project-create-btn:hover { color: var(--foreground); }
+
+.project-create-btn-worktree { color: var(--muted-foreground); }
+
+/* ── Session list ── */
 .session-list {
   display: grid;
-  gap: 0.25rem;
-  padding: 0 0 0.45rem 0.28rem;
+  padding: 0.25rem 0;
 }
 
 .session-row {
   display: grid;
-  gap: 0.18rem;
-  padding: 0.58rem 0.58rem;
-  border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
-  border-radius: 0.82rem;
-  background: color-mix(in srgb, var(--card) 84%, transparent);
+  gap: 0.1rem;
+  padding: 0.45rem 0.75rem 0.45rem 2.6rem;
+  border: none;
+  border-left: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
   text-align: left;
-  transition: border-color 0.18s ease, background-color 0.18s ease, transform 0.18s ease;
+  cursor: pointer;
+  transition: background 0.1s, border-color 0.1s;
 }
+
+.session-row:hover { background: var(--secondary); }
 
 .session-row-worktree {
   position: relative;
-  border-color: color-mix(in srgb, var(--primary) 28%, var(--border));
-  background:
-    linear-gradient(90deg, color-mix(in srgb, var(--primary) 10%, transparent), transparent 32%),
-    color-mix(in srgb, var(--card) 92%, transparent);
-}
-
-.session-row-worktree::before {
-  content: '';
-  position: absolute;
-  left: 0.22rem;
-  top: 0.5rem;
-  bottom: 0.5rem;
-  width: 0.2rem;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--primary) 78%, var(--foreground));
-}
-
-.session-row:hover {
-  border-color: color-mix(in srgb, var(--primary) 32%, var(--border));
-  background: color-mix(in srgb, var(--accent) 45%, transparent);
-  transform: translateX(2px);
+  background: color-mix(in srgb, var(--primary) 5%, transparent);
+  border-left: 2px solid color-mix(in srgb, var(--primary) 40%, transparent);
 }
 
 .session-row-worktree:hover {
-  border-color: color-mix(in srgb, var(--primary) 46%, var(--border));
-  background:
-    linear-gradient(90deg, color-mix(in srgb, var(--primary) 16%, transparent), transparent 36%),
-    color-mix(in srgb, var(--accent) 50%, transparent);
+  background: color-mix(in srgb, var(--primary) 9%, var(--secondary));
+  border-left-color: color-mix(in srgb, var(--primary) 65%, transparent);
 }
 
 .session-row-active {
-  border-color: color-mix(in srgb, var(--primary) 50%, var(--border));
-  background: color-mix(in srgb, var(--primary) 10%, var(--card));
+  background: var(--accent);
 }
 
+.session-row-active:hover { background: var(--accent); }
+
 .session-row-worktree.session-row-active {
-  border-color: color-mix(in srgb, var(--primary) 56%, var(--border));
-  background:
-    linear-gradient(90deg, color-mix(in srgb, var(--primary) 18%, transparent), transparent 40%),
-    color-mix(in srgb, var(--primary) 10%, var(--card));
+  background: color-mix(in srgb, var(--primary) 12%, var(--accent));
+  border-left-color: var(--primary);
+}
+
+.session-row-top {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+}
+
+.session-title-row {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+  flex: 1;
 }
 
 .session-title {
   min-width: 0;
   flex: 1;
-  font-size: 0.85rem;
-  font-weight: 600;
-  line-height: 1.25;
+  font-size: 0.8rem;
+  font-weight: 400;
+  line-height: 1.3;
   color: var(--foreground);
-  white-space: normal;
-  word-break: break-word;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
+
+.session-row-active .session-title { font-weight: 500; }
 
 .worktree-badge {
   flex-shrink: 0;
-  font-size: 0.62rem;
-  padding: 0.08rem 0.34rem;
-  background: color-mix(in srgb, var(--primary) 16%, transparent);
-  color: color-mix(in srgb, var(--primary) 78%, var(--foreground));
-  border: 1px solid color-mix(in srgb, var(--primary) 24%, transparent);
-}
-
-.session-time,
-.project-time {
-  flex-shrink: 0;
-  font-size: 0.7rem;
+  font-size: 0.6rem;
+  font-family: var(--font-mono);
+  font-weight: 500;
+  padding: 0.05rem 0.28rem;
+  border-radius: 3px;
+  color: var(--muted-foreground);
+  border: 1px solid var(--border);
+  background: var(--secondary);
+  letter-spacing: 0.02em;
 }
 
 .session-row-bottom {
-  align-items: flex-start;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
 }
 
 .session-preview {
@@ -811,105 +803,143 @@ const sessionRowState = computed(() => {
   min-width: 0;
   flex: 1;
   align-items: center;
-  gap: 0.28rem;
-  font-size: 0.72rem;
+  gap: 0.2rem;
+  font-size: 0.7rem;
+  color: var(--muted-foreground);
 }
 
-.session-meta-dot {
+.session-preview-working { color: var(--foreground); }
+
+.session-preview-spinner {
+  width: 0.65rem;
+  height: 0.65rem;
   flex-shrink: 0;
-}
-
-.session-preview-working {
   color: var(--foreground);
 }
 
-.session-preview-spinner {
-  width: 0.8rem;
-  height: 0.8rem;
-  flex-shrink: 0;
-  color: var(--primary);
-}
+.session-time { font-size: 0.68rem; }
 
 .session-badges {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 0.2rem;
+  gap: 0.15rem;
 }
 
 .session-badge {
-  padding: 0.05rem 0.35rem;
-  border-radius: 999px;
-  font-size: 0.58rem;
-  letter-spacing: 0.08em;
+  padding: 0.05rem 0.3rem;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font-size: 0.6rem;
+  letter-spacing: 0.04em;
+  color: var(--muted-foreground);
+  background: var(--secondary);
 }
 
+.session-badge[data-tone="success"] { color: #50e3c2; border-color: rgba(80, 227, 194, 0.2); }
+.session-badge[data-tone="warning"] { color: #f5a623; border-color: rgba(245, 166, 35, 0.2); }
+.session-badge[data-tone="error"]   { color: #e5484d; border-color: rgba(229, 72, 77, 0.2); }
+
+/* ── Empty states ── */
 .empty-project-state {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
-  padding: 0.85rem 0.9rem;
-  border: 1px dashed color-mix(in srgb, var(--border) 72%, transparent);
-  border-radius: 1rem;
+  margin: 0.25rem 0.75rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
   color: var(--muted-foreground);
-  font-size: 0.8rem;
+  font-size: 0.75rem;
 }
 
 .empty-project-actions {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 0.5rem;
+  gap: 0.4rem;
 }
 
 .project-session-actions {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
-  padding: 0 0.15rem;
+  gap: 0.5rem;
+  padding: 0.3rem 0.75rem;
 }
 
 .project-more-btn {
-  border-radius: 0.9rem;
+  border-radius: var(--radius);
+  font-size: 0.72rem;
+  height: 1.5rem;
 }
 
 .project-session-feedback {
-  font-size: 0.72rem;
+  font-size: 0.7rem;
   color: var(--muted-foreground);
 }
 
-.project-session-feedback-error {
-  color: var(--destructive);
+.project-session-feedback-error { color: var(--destructive); }
+
+/* ── Footer ── */
+.sidebar-footer {
+  flex-shrink: 0;
+  padding: 0.5rem 0.75rem;
+  border-top: 1px solid var(--border);
+}
+
+.sidebar-footer-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.45rem 0.5rem;
+  border: none;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: 0.8rem;
+  font-weight: 400;
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s;
+}
+
+.sidebar-footer-btn:hover {
+  background: var(--secondary);
+  color: var(--foreground);
 }
 
 .sidebar-empty {
   display: grid;
   flex: 1;
   place-items: center;
-  gap: 0.6rem;
-  padding: 2rem 1rem;
+  gap: 0.75rem;
+  padding: 2rem 1.5rem;
   color: var(--muted-foreground);
   text-align: center;
 }
 
 .sidebar-empty-icon {
   display: grid;
-  width: 2.75rem;
-  height: 2.75rem;
+  width: 2rem;
+  height: 2rem;
   place-items: center;
-  border-radius: 1rem;
-  background: color-mix(in srgb, var(--accent) 55%, transparent);
-  color: var(--foreground);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--secondary);
+  color: var(--muted-foreground);
 }
 
 .sidebar-empty strong {
   color: var(--foreground);
+  font-size: 0.8125rem;
+  font-weight: 500;
 }
 
 .sidebar-empty p {
   margin: 0;
-  max-width: 18rem;
+  max-width: 16rem;
   line-height: 1.6;
+  font-size: 0.75rem;
 }
 </style>
