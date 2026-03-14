@@ -146,10 +146,11 @@ watch(
           v-for="session in app.sessions"
           :key="session.id"
           class="session-item"
+          :class="{ 'session-item-worktree': app.isWorktreeSession(session) }"
           @click="openConversation(session.id)"
         >
           <div class="session-avatar-box">
-            <div class="avatar-circle" :style="getSessionProjectIconStyle(session)">
+            <div class="avatar-circle" :class="{ 'avatar-circle-worktree': app.isWorktreeSession(session) }" :style="getSessionProjectIconStyle(session)">
               <img
                 v-if="getSessionProjectIcon(session)"
                 :src="getSessionProjectIcon(session)"
@@ -167,7 +168,10 @@ watch(
 
           <div class="session-info">
             <div class="session-top-row">
-              <h3 class="session-title">{{ session.title || '未命名对话' }}</h3>
+              <div class="session-title-row">
+                <h3 class="session-title">{{ session.title || '未命名对话' }}</h3>
+                <Badge v-if="app.isWorktreeSession(session)" tone="accent" class="worktree-badge">Worktree</Badge>
+              </div>
               <span class="session-time">
                 {{ formatRelativeTime(session.time.updated || session.time.created) }}
               </span>
@@ -322,12 +326,36 @@ watch(
   border-bottom: 0.5px solid color-mix(in srgb, var(--border) 40%, transparent);
 }
 
+.session-item-worktree {
+  position: relative;
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--primary) 11%, transparent), transparent 24%),
+    color-mix(in srgb, var(--card) 88%, transparent);
+}
+
+.session-item-worktree::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0.7rem;
+  bottom: 0.7rem;
+  width: 0.24rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--primary) 82%, var(--foreground));
+}
+
 .session-item:last-child {
   border-bottom: none;
 }
 
 .session-item:hover {
   background-color: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.session-item-worktree:hover {
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--primary) 17%, transparent), transparent 28%),
+    color-mix(in srgb, var(--accent) 22%, transparent);
 }
 
 .session-avatar-box {
@@ -376,6 +404,10 @@ watch(
   /* 聊天软件风格：更清爽的头像，不带过多阴影 */
 }
 
+.avatar-circle-worktree {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 24%, transparent);
+}
+
 .avatar-image {
   width: 100%;
   height: 100%;
@@ -394,6 +426,14 @@ watch(
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 0.75rem;
+}
+
+.session-title-row {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
 }
 
 .session-title {
@@ -404,6 +444,15 @@ watch(
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.worktree-badge {
+  flex-shrink: 0;
+  font-size: 0.64rem;
+  padding: 0.1rem 0.38rem;
+  background: color-mix(in srgb, var(--primary) 16%, transparent);
+  color: color-mix(in srgb, var(--primary) 78%, var(--foreground));
+  border: 1px solid color-mix(in srgb, var(--primary) 24%, transparent);
 }
 
 .session-time {

@@ -377,11 +377,14 @@ function getSessionPreviewState(session: SessionRecord) {
             :key="session.id"
             type="button"
             class="session-row"
-            :class="{ 'session-row-active': activeSessionIds.has(session.id) }"
+            :class="{ 'session-row-active': activeSessionIds.has(session.id), 'session-row-worktree': app.isWorktreeSession(session) }"
             @click="openSession(session.id)"
           >
             <div class="session-row-top">
-              <span class="session-title">{{ session.title || '未命名对话' }}</span>
+              <div class="session-title-row">
+                <span class="session-title">{{ session.title || '未命名对话' }}</span>
+                <Badge v-if="app.isWorktreeSession(session)" tone="accent" class="worktree-badge">Worktree</Badge>
+              </div>
             </div>
 
             <div class="session-row-bottom">
@@ -611,7 +614,16 @@ function getSessionPreviewState(session: SessionRecord) {
 }
 
 .session-row-top {
-  display: block;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.session-title-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
 }
 
 .project-heading-row strong {
@@ -711,15 +723,48 @@ function getSessionPreviewState(session: SessionRecord) {
   transition: border-color 0.18s ease, background-color 0.18s ease, transform 0.18s ease;
 }
 
+.session-row-worktree {
+  position: relative;
+  border-color: color-mix(in srgb, var(--primary) 28%, var(--border));
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--primary) 10%, transparent), transparent 32%),
+    color-mix(in srgb, var(--card) 92%, transparent);
+}
+
+.session-row-worktree::before {
+  content: '';
+  position: absolute;
+  left: 0.22rem;
+  top: 0.5rem;
+  bottom: 0.5rem;
+  width: 0.2rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--primary) 78%, var(--foreground));
+}
+
 .session-row:hover {
   border-color: color-mix(in srgb, var(--primary) 32%, var(--border));
   background: color-mix(in srgb, var(--accent) 45%, transparent);
   transform: translateX(2px);
 }
 
+.session-row-worktree:hover {
+  border-color: color-mix(in srgb, var(--primary) 46%, var(--border));
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--primary) 16%, transparent), transparent 36%),
+    color-mix(in srgb, var(--accent) 50%, transparent);
+}
+
 .session-row-active {
   border-color: color-mix(in srgb, var(--primary) 50%, var(--border));
   background: color-mix(in srgb, var(--primary) 10%, var(--card));
+}
+
+.session-row-worktree.session-row-active {
+  border-color: color-mix(in srgb, var(--primary) 56%, var(--border));
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--primary) 18%, transparent), transparent 40%),
+    color-mix(in srgb, var(--primary) 10%, var(--card));
 }
 
 .session-title {
@@ -731,6 +776,15 @@ function getSessionPreviewState(session: SessionRecord) {
   color: var(--foreground);
   white-space: normal;
   word-break: break-word;
+}
+
+.worktree-badge {
+  flex-shrink: 0;
+  font-size: 0.62rem;
+  padding: 0.08rem 0.34rem;
+  background: color-mix(in srgb, var(--primary) 16%, transparent);
+  color: color-mix(in srgb, var(--primary) 78%, var(--foreground));
+  border: 1px solid color-mix(in srgb, var(--primary) 24%, transparent);
 }
 
 .session-time,

@@ -323,9 +323,13 @@ export function useOpencodeApp() {
 
   function getSessionWorktreeInfo(sessionId: string): SessionWorktreeInfo | null {
     const session = sessions.value.find((item) => item.id === sessionId) ?? null
+    if (!isWorktreeSession(session)) {
+      return null
+    }
+
     const worktreeDirectory = normalizeDirectory(session?.directory)
     const rootDirectory = resolveSessionRootDirectory(session)
-    if (!session || !worktreeDirectory || !rootDirectory || worktreeDirectory === rootDirectory) {
+    if (!session || !worktreeDirectory || !rootDirectory) {
       return null
     }
 
@@ -343,6 +347,16 @@ export function useOpencodeApp() {
       branchLoading: branchState?.loading ?? false,
       branchError: branchState?.error || ''
     }
+  }
+
+  function isWorktreeSession(session?: SessionRecord | null) {
+    if (!session) {
+      return false
+    }
+
+    const worktreeDirectory = normalizeDirectory(session.directory)
+    const rootDirectory = resolveSessionRootDirectory(session)
+    return Boolean(worktreeDirectory && rootDirectory && worktreeDirectory !== rootDirectory)
   }
 
   async function ensureSessionWorktreeInfo(sessionId: string) {
@@ -1273,6 +1287,7 @@ export function useOpencodeApp() {
     canCreateSession,
     ensureSessionWorktreeInfo,
     getSessionWorktreeInfo,
+    isWorktreeSession,
     historyMessageLimit,
     hiddenMessageCount,
     hasMoreHistory,
