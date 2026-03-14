@@ -109,7 +109,7 @@ const rootStateText = computed(() => {
   }
 
   if (rootDirty.value) {
-    return `主仓库当前有 ${rootChangedCount.value} 个未提交改动，暂时不能合并`
+    return `主仓库当前有 ${rootChangedCount.value} 个未提交改动，合并时以 Git 实际结果为准`
   }
 
   return '主仓库工作区已干净'
@@ -185,11 +185,6 @@ async function mergeIntoRoot() {
     seedCommitMessage()
     commitDialogOpen.value = true
     feedback.value = '当前 worktree 还有未提交改动，请先提交。'
-    return
-  }
-
-  if (rootDirty.value) {
-    feedback.value = `worktree 已经是干净的，但主仓库当前还有 ${rootChangedCount.value} 个未提交改动，请先在主仓库处理。`
     return
   }
 

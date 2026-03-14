@@ -47,12 +47,6 @@ const server = http.createServer(async (request, response) => {
       case '/merge': {
         const directory = requireString(body.directory, 'directory')
         const branch = requireString(body.branch, 'branch')
-        const rootStatus = await getGitStatus(directory)
-        if (rootStatus.dirty) {
-          sendJson(response, 409, { error: '主仓库当前有未提交改动，请先处理后再合并。' })
-          return
-        }
-
         const compare = await runGit(['-C', directory, 'rev-list', '--left-right', '--count', `HEAD...${branch}`])
         const [, aheadCountRaw] = compare.stdout.trim().split(/\s+/)
         const aheadCount = Number.parseInt(aheadCountRaw ?? '0', 10)
