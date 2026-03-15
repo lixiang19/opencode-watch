@@ -66,7 +66,7 @@ const projectGroups = computed<ProjectSessionGroup[]>(() => {
   const unboundSessions: SessionRecord[] = []
 
   for (const project of app.projects) {
-    const key = getProjectIdentityKey(project.projectId, project.directory)
+    const key = getProjectIdentityKey(project.directory)
     groups.set(key, {
       key,
       name: project.name,

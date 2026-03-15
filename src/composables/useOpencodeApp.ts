@@ -88,7 +88,6 @@ interface SessionProjectGrouping {
   key: string
   directory: string
   name: string
-  projectId?: string
   icon?: ProjectIconRecord
   isWorktree: boolean
   rootDirectory: string
@@ -336,23 +335,17 @@ export function useOpencodeApp() {
     suppressedChatOptionLoadKey = getChatOptionsCacheKey(directory)
   }
 
-  function getProjectCatalogEntry(projectId?: string | null) {
-    const normalizedProjectId = projectId?.trim() || ''
-    if (!normalizedProjectId) {
+  function getProjectCatalogEntryByDirectory(directory?: string | null) {
+    const normalizedDirectory = normalizeDirectory(directory)
+    if (!normalizedDirectory) {
       return null
     }
 
-    return projectCatalog.value.find((project) => project.projectId === normalizedProjectId) ?? null
+    return projectCatalog.value.find((project) => project.directory === normalizedDirectory) ?? null
   }
 
   function getSessionProjectRootCandidate(session?: SessionRecord | null) {
-    if (!session) {
-      return ''
-    }
-
-    const projectId = session.projectId || session.project?.id || ''
-    const projectMatch = getProjectCatalogEntry(projectId)
-    return normalizeDirectory(session.project?.worktree || projectMatch?.directory || session.directory)
+    return normalizeDirectory(session?.project?.worktree || session?.directory)
   }
 
   function getCachedGitDirectoryStatus(directory?: string | null) {
@@ -378,33 +371,21 @@ export function useOpencodeApp() {
       return null
     }
 
-    const projectId = session.projectId || session.project?.id || ''
-    const rootCandidate = getSessionProjectRootCandidate(session)
     const status = getCachedGitDirectoryStatus(sessionDirectory)
-    const linkedWorktree = isLinkedWorktreeRoot(status)
-    const sessionMatchesProjectRoot = Boolean(rootCandidate && sessionDirectory === rootCandidate)
-    const rootDirectory = linkedWorktree
-      ? normalizeDirectory(status?.mainWorktreeRoot || rootCandidate || sessionDirectory)
-      : sessionMatchesProjectRoot
-        ? rootCandidate
-        : ''
-    const groupDirectory = rootDirectory || sessionDirectory
-    const key = linkedWorktree
-      ? getProjectIdentityKey(projectId, groupDirectory)
-      : sessionMatchesProjectRoot
-        ? getProjectIdentityKey(projectId, groupDirectory)
-        : getProjectIdentityKey('', sessionDirectory)
-    const useProjectMeta = linkedWorktree || sessionMatchesProjectRoot
+    const rootCandidate = getSessionProjectRootCandidate(session)
+    const rootDirectory = normalizeDirectory(status?.mainWorktreeRoot || rootCandidate || sessionDirectory)
+    const projectEntry = getProjectCatalogEntryByDirectory(rootDirectory)
+    const sessionProjectMatchesRoot = normalizeDirectory(session.project?.worktree) === rootDirectory
+    const isWorktree = rootDirectory !== sessionDirectory
 
     return {
-      key,
-      directory: groupDirectory,
-      name: useProjectMeta ? session.project?.name || getDirectoryName(groupDirectory) : getDirectoryName(sessionDirectory),
-      projectId: useProjectMeta ? projectId : '',
-      icon: useProjectMeta ? session.project?.icon : undefined,
-      isWorktree: linkedWorktree,
-      rootDirectory: linkedWorktree ? groupDirectory : '',
-      worktreeDirectory: linkedWorktree ? sessionDirectory : ''
+      key: getProjectIdentityKey(rootDirectory),
+      directory: rootDirectory,
+      name: projectEntry?.name || (sessionProjectMatchesRoot ? session.project?.name : '') || getDirectoryName(rootDirectory),
+      icon: projectEntry?.icon || (sessionProjectMatchesRoot ? session.project?.icon : undefined),
+      isWorktree,
+      rootDirectory: isWorktree ? rootDirectory : '',
+      worktreeDirectory: isWorktree ? sessionDirectory : ''
     }
   }
 
@@ -511,15 +492,7 @@ export function useOpencodeApp() {
 
   async function preloadSessionGitStatuses(sessionList: SessionRecord[]) {
     const directories = Array.from(new Set(sessionList
-      .map((session) => {
-        const sessionDirectory = normalizeDirectory(session.directory)
-        if (!sessionDirectory) {
-          return ''
-        }
-
-        const rootCandidate = getSessionProjectRootCandidate(session)
-        return sessionDirectory !== rootCandidate ? sessionDirectory : ''
-      })
+      .map((session) => normalizeDirectory(session.directory))
       .filter(Boolean)))
 
     if (!directories.length) {
@@ -710,7 +683,6 @@ export function useOpencodeApp() {
     isSending,
     lastError,
     messages,
-    mergeSessions,
     sessions,
     selectedAgent,
     selectedAgentId,
@@ -1575,6 +1547,18 @@ export function useOpencodeApp() {
 
   function handleEvent(event: OpencodeEvent, eventDirectory?: string) {
     const eventSessionId = getEventSessionId(event)
+    const updatedCollections = new Set<ChatMessageRecord[]>()
+
+    function applyEventToCollection(collection: ChatMessageRecord[]) {
+      if (updatedCollections.has(collection)) {
+        return collection
+      }
+
+      const nextMessages = updateMessageCollection(collection, event)
+      updatedCollections.add(collection)
+      updatedCollections.add(nextMessages)
+      return nextMessages
+    }
 
     if (event.type === 'session.created') {
       scheduleSessionListRefresh({ newSessionId: eventSessionId })
@@ -1607,7 +1591,7 @@ export function useOpencodeApp() {
       const cachedSessionState = mobileSessionCache.get(eventSessionId)
 
       if (selectedSessionId.value === eventSessionId) {
-        const nextMessages = updateMessageCollection(messages.value, event)
+        const nextMessages = applyEventToCollection(messages.value)
         if (nextMessages !== messages.value) {
           messages.value = nextMessages
         }
@@ -1615,20 +1599,20 @@ export function useOpencodeApp() {
       }
 
       if (desktopSessionState) {
-        const nextMessages = updateMessageCollection(desktopSessionState.messages, event)
+        const nextMessages = applyEventToCollection(desktopSessionState.messages)
         if (nextMessages !== desktopSessionState.messages) {
           desktopSessionState.messages = nextMessages
         }
         syncSessionPreviewFromMessages(eventSessionId, desktopSessionState.messages)
       } else if (cachedSessionState) {
-        const nextMessages = updateMessageCollection(cachedSessionState.messages, event)
+        const nextMessages = applyEventToCollection(cachedSessionState.messages)
         if (nextMessages !== cachedSessionState.messages) {
           cachedSessionState.messages = nextMessages
         }
         setCachedSessionState(eventSessionId, cachedSessionState)
         syncSessionPreviewFromMessages(eventSessionId, cachedSessionState.messages)
       } else if (selectedSessionId.value !== eventSessionId && sessionPreviewMessages.value[eventSessionId]) {
-        const nextPreviewMessages = updateMessageCollection(sessionPreviewMessages.value[eventSessionId], event)
+        const nextPreviewMessages = applyEventToCollection(sessionPreviewMessages.value[eventSessionId])
         if (nextPreviewMessages !== sessionPreviewMessages.value[eventSessionId]) {
           sessionPreviewMessages.value[eventSessionId] = nextPreviewMessages
         }

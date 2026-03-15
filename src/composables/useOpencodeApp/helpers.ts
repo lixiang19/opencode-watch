@@ -30,12 +30,7 @@ export function formatPathTail(input?: string | null, depth = 4) {
   return `.../${parts.slice(-depth).join('/')}`
 }
 
-export function getProjectIdentityKey(projectId?: string | null, directory?: string | null) {
-  const normalizedProjectId = projectId?.trim() || ''
-  if (normalizedProjectId) {
-    return `project:${normalizedProjectId}`
-  }
-
+export function getProjectIdentityKey(directory?: string | null) {
   const normalizedDirectory = normalizeDirectory(directory)
   return normalizedDirectory ? `directory:${normalizedDirectory}` : ''
 }
