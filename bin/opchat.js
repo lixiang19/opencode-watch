@@ -4,6 +4,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
+import net from "node:net";
 import path from "node:path";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -59,22 +60,27 @@ async function runDev(args) {
   });
 
   const backendChild = spawnLocalBackend({ OPCHAT_STATIC_MODE: "off" });
-  await runManagedProcesses([backendChild, webChild]);
+  const opencodeChild = await ensureOpencodeServe();
+  await runManagedProcesses([backendChild, webChild, opencodeChild].filter(Boolean));
 }
 
 async function runWeb(args) {
   await runNodeTool(vueTscBin, ["-b"]);
   await runNodeTool(viteBin, ["build", ...args]);
 
+  const opencodeChild = await ensureOpencodeServe();
   await runManagedProcesses([
     spawnLocalBackend({ OPCHAT_STATIC_MODE: "on" }),
-  ]);
+    opencodeChild,
+  ].filter(Boolean));
 }
 
 async function runPreview(args) {
+  const opencodeChild = await ensureOpencodeServe();
   await runManagedProcesses([
     spawnLocalBackend({ OPCHAT_STATIC_MODE: "on" }),
-  ]);
+    opencodeChild,
+  ].filter(Boolean));
 }
 
 function spawnLocalBackend(extraEnv = {}) {
@@ -86,6 +92,29 @@ function spawnLocalBackend(extraEnv = {}) {
       ...extraEnv,
     },
   });
+}
+
+function spawnOpencodeServe() {
+  return spawn("opencode", buildOpencodeServeArgs(), {
+    cwd: opencodeRoot(),
+    stdio: "inherit",
+    env: process.env,
+  });
+}
+
+async function ensureOpencodeServe() {
+  if (await canReachOpencodeServer()) {
+    console.log(`[opchat] reuse existing opencode serve on ${opencodeBaseUrl()}`);
+    return null;
+  }
+
+  if (await isPortOccupied(opencodePort())) {
+    throw new Error(`端口 ${opencodePort()} 已被占用，但现有服务不是可用的 opencode serve，请先释放端口或修改 OPENCODE_SERVER_PORT。`);
+  }
+
+  const child = spawnOpencodeServe();
+  await waitForOpencodeReady(child);
+  return child;
 }
 
 async function runManagedProcesses(children) {
@@ -139,9 +168,9 @@ async function runDoctor() {
       ...(await commandStatus("opencode", ["--version"])),
     },
     {
-      label: "OPENCODE_SERVER_ROOT",
-      ok: fs.existsSync(opencodeRoot()),
-      detail: opencodeRoot(),
+      label: "OPCHAT_BACKEND_PORT",
+      ok: isPort(backendPort()),
+      detail: backendPort(),
     },
     {
       label: "VITE_PORT",
@@ -152,6 +181,11 @@ async function runDoctor() {
       label: "OPENCODE_SERVER_PORT",
       ok: isPort(opencodePort()),
       detail: opencodePort(),
+    },
+    {
+      label: "OPENCODE_SERVER_ROOT",
+      ok: fs.existsSync(opencodeRoot()),
+      detail: opencodeRoot(),
     },
   ];
 
@@ -196,6 +230,49 @@ function waitForExit(child) {
   });
 }
 
+async function waitForOpencodeReady(child) {
+  const deadline = Date.now() + 30000;
+
+  while (Date.now() < deadline) {
+    if (child.exitCode !== null || child.killed) {
+      throw new Error(`opencode serve 启动失败，退出码 ${child.exitCode ?? 1}`);
+    }
+
+    if (await canReachOpencodeServer()) {
+      console.log(`[opchat] opencode serve ready on ${opencodeBaseUrl()}`);
+      return;
+    }
+
+    await wait(400);
+  }
+
+  child.kill("SIGTERM");
+  throw new Error(`等待 opencode serve 就绪超时：${opencodeBaseUrl()}`);
+}
+
+async function canReachOpencodeServer() {
+  try {
+    const response = await fetch(`${opencodeBaseUrl()}/global/health`);
+    return response.status < 500;
+  } catch {
+    return false;
+  }
+}
+
+function isPortOccupied(port) {
+  return new Promise((resolve) => {
+    const socket = net.createConnection({ host: "127.0.0.1", port: Number(port) });
+
+    socket.once("connect", () => {
+      socket.destroy();
+      resolve(true);
+    });
+    socket.once("error", () => {
+      resolve(false);
+    });
+  });
+}
+
 function commandStatus(commandName, args) {
   return new Promise((resolve) => {
     const child = spawn(commandName, args, {
@@ -236,12 +313,57 @@ function vitePort() {
   return process.env.VITE_PORT ?? "9000";
 }
 
+function backendPort() {
+  return process.env.OPCHAT_BACKEND_PORT ?? "9001";
+}
+
 function opencodePort() {
   return process.env.OPENCODE_SERVER_PORT ?? "4096";
 }
 
+function opencodeBaseUrl() {
+  return `http://127.0.0.1:${opencodePort()}`;
+}
+
 function opencodeRoot() {
   return process.env.OPENCODE_SERVER_ROOT ?? process.env.HOME ?? projectRoot;
+}
+
+function buildOpencodeServeArgs() {
+  const args = ["serve", "--hostname", "0.0.0.0", "--port", opencodePort()];
+  for (const origin of opencodeCorsOrigins()) {
+    args.push("--cors", origin);
+  }
+
+  return args;
+}
+
+function opencodeCorsOrigins() {
+  const origins = new Set([
+    `http://localhost:${vitePort()}`,
+    `http://127.0.0.1:${vitePort()}`,
+    `http://localhost:${backendPort()}`,
+    `http://127.0.0.1:${backendPort()}`,
+    "http://localhost:5173",
+  ]);
+
+  for (const origin of extraOpencodeCorsOrigins()) {
+    origins.add(origin);
+  }
+
+  return [...origins].filter(Boolean);
+}
+
+function extraOpencodeCorsOrigins() {
+  const raw = process.env.OPCHAT_OPENCODE_CORS ?? "";
+  return raw
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function resolvePackageFile(packageName, relativePath) {
@@ -250,5 +372,5 @@ function resolvePackageFile(packageName, relativePath) {
 }
 
 function printHelp() {
-  console.log(`opchat <command>\n\nCommands:\n  dev      Start local backend plus Vite dev server\n  web      Build and start the production web server\n  build    Type-check and build the web app\n  preview  Start the production web server without rebuilding\n  doctor   Check local runtime dependencies\n  help     Show this help message`);
+  console.log(`opchat <command>\n\nCommands:\n  dev      Start local backend, Vite dev server, and opencode serve\n  web      Build and start the production web server plus opencode serve\n  build    Type-check and build the web app\n  preview  Start the production web server plus opencode serve\n  doctor   Check local runtime dependencies\n  help     Show this help message`);
 }

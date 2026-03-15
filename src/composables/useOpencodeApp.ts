@@ -49,19 +49,14 @@ import { createSessionStateManager } from '@/composables/useOpencodeApp/sessionS
 import {
   getGitDirectoryStatus,
   getAdminSessionStatus,
-  getLocalRuntimeStatus,
   loginAdminSession,
   logoutAdminSession,
-  restartManagedOpencode,
   setLocalBackendCsrfToken,
-  type AdminSessionStatus,
-  type GitDirectoryStatus,
-  type LocalRuntimeStatus
+  type GitDirectoryStatus
 } from '@/lib/localBackend'
 import {
   readSessionStorage,
   readStorage,
-  writeSessionStorage,
   writeStorage
 } from '@/lib/storage'
 import type {
@@ -101,17 +96,16 @@ interface SessionProjectGrouping {
   worktreeDirectory: string
 }
 
-const LOCAL_OPENCODE_PROXY_PATH = '/oc'
-const LEGACY_LOCAL_OPENCODE_URLS = new Set(['http://127.0.0.1:4096', 'http://localhost:4096'])
+const LEGACY_LOCAL_OPENCODE_URLS = new Set(['/oc', 'http://127.0.0.1:4096', 'http://localhost:4096'])
 const ABSOLUTE_URL_PATTERN = /^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//
 
 function resolveInitialServerUrl() {
-  const storedValue = readStorage(STORAGE_KEYS.serverUrl, LOCAL_OPENCODE_PROXY_PATH).trim()
+  const storedValue = readStorage(STORAGE_KEYS.serverUrl, '').trim()
   if (!storedValue) {
-    return LOCAL_OPENCODE_PROXY_PATH
+    return ''
   }
 
-  return LEGACY_LOCAL_OPENCODE_URLS.has(storedValue) ? LOCAL_OPENCODE_PROXY_PATH : storedValue
+  return LEGACY_LOCAL_OPENCODE_URLS.has(storedValue) ? '' : storedValue
 }
 
 function resolveInitialChatSelections() {
@@ -141,7 +135,11 @@ function resolveInitialChatSelections() {
 }
 
 function resolveServerBaseUrl(value: string) {
-  const trimmed = value.trim() || LOCAL_OPENCODE_PROXY_PATH
+  const trimmed = value.trim()
+  if (!trimmed) {
+    return ''
+  }
+
   if (ABSOLUTE_URL_PATTERN.test(trimmed)) {
     return trimmed
   }
@@ -154,8 +152,8 @@ export function useOpencodeApp() {
   const initialChatSelections = resolveInitialChatSelections()
   const serverUrl = ref(resolveInitialServerUrl())
   const adminPassword = ref('')
-  const username = ref(readStorage(STORAGE_KEYS.username, 'opencode'))
-  const password = ref(readSessionStorage(STORAGE_KEYS.password, ''))
+  const username = ref(readStorage(STORAGE_KEYS.username, ''))
+  const password = ref(readStorage(STORAGE_KEYS.password, readSessionStorage(STORAGE_KEYS.password, '')))
   const selectedSessionId = ref(readStorage(STORAGE_KEYS.selectedSession, ''))
   const draftDirectory = ref(readStorage(STORAGE_KEYS.draftDirectory, ''))
   const composerMode = ref<ComposerMode>(
@@ -182,7 +180,6 @@ export function useOpencodeApp() {
   const isRefreshing = ref(false)
   const isLoadingOlderMessages = ref(false)
   const isAdminAuthenticating = ref(false)
-  const isRestartingOpencode = ref(false)
   const sessionStatus = ref<'idle' | 'busy'>('idle')
   const lastError = ref('')
   const adminAuthError = ref('')
@@ -193,8 +190,6 @@ export function useOpencodeApp() {
   const historyMessageLimit = ref(INITIAL_HISTORY_LIMIT)
   const hasMoreHistory = ref(false)
   const sessionListUiState = ref<Record<string, SessionListUiState>>({})
-  const localRuntimeStatus = ref<LocalRuntimeStatus | null>(null)
-  const adminSessionExpiresAt = ref('')
   const opencodeAuthRequested = ref(false)
 
   const clientCache = new Map<string, OpencodeClient>()
@@ -213,7 +208,14 @@ export function useOpencodeApp() {
   const gitDirectoryState = ref<Record<string, { status: GitDirectoryStatus | null; loading: boolean; error: string }>>({})
   const gitDirectoryRequests = new Map<string, Promise<GitDirectoryStatus>>()
 
+  const hasServerUrl = computed(() => Boolean(resolveServerBaseUrl(serverUrl.value)))
   const hasAuthCredentials = computed(() => Boolean(username.value.trim()) && Boolean(password.value.trim()))
+  const hasOpenCodeConfig = computed(() => hasServerUrl.value && hasAuthCredentials.value)
+
+  if (password.value) {
+    writeStorage(STORAGE_KEYS.password, password.value)
+  }
+
   const authGateMode = computed<'admin' | 'opencode' | null>(() => {
     if (!adminSessionReady.value || !adminAuthenticated.value) {
       return 'admin'
@@ -227,8 +229,12 @@ export function useOpencodeApp() {
       return adminAuthError.value || '请输入管理密码，先建立本地控制面的安全会话。'
     }
 
+    if (!hasServerUrl.value) {
+      return '请先填写 OpenCode 地址，再继续连接和订阅 SSE。'
+    }
+
     if (!hasAuthCredentials.value) {
-      return '当前 OpenCode 服务开启了 Basic Auth，请填写账号和密码。'
+      return '请填写 OpenCode 的账号和密码，这些信息会直接保存在当前浏览器本地。'
     }
 
     return lastError.value || '请输入可用的认证信息并完成连接验证。'
@@ -473,6 +479,10 @@ export function useOpencodeApp() {
   const connectionStateLabel = computed(() => {
     if (isConnecting.value) {
       return '连接中'
+    }
+
+    if (!hasOpenCodeConfig.value) {
+      return '待配置'
     }
 
     return streamReady.value ? '已连接' : '未连接'
@@ -811,6 +821,10 @@ export function useOpencodeApp() {
     authValidated.value = false
     streamReady.value = false
     clientCache.clear()
+    sessions.value = []
+    projectCatalog.value = []
+    messages.value = []
+    sessionPreviewMessages.value = {}
     mobileSessionCache.clear()
     mobileSessionCacheOrder.splice(0, mobileSessionCacheOrder.length)
     chatOptionsCache.clear()
@@ -841,7 +855,6 @@ export function useOpencodeApp() {
         if (!session?.authenticated) {
           adminAuthError.value = '管理登录已失效，请重新登录。'
           adminAuthenticated.value = false
-          localRuntimeStatus.value = null
           setLocalBackendCsrfToken('')
           invalidateAuth()
           return
@@ -1313,8 +1326,9 @@ export function useOpencodeApp() {
       return cachedClient
     }
 
+    const baseUrl = resolveServerBaseUrl(serverUrl.value)
     const nextClient = createOpencodeClient({
-      baseUrl: serverUrl.value,
+      baseUrl,
       headers: getRequestHeaders(),
       directory: normalizedDirectory || undefined
     })
@@ -1458,9 +1472,7 @@ export function useOpencodeApp() {
       const session = await getAdminSessionStatus()
       adminSessionReady.value = true
       adminAuthenticated.value = session.authenticated
-      adminSessionExpiresAt.value = session.expiresAt || ''
       if (!session.authenticated) {
-        localRuntimeStatus.value = null
         return session
       }
 
@@ -1469,9 +1481,7 @@ export function useOpencodeApp() {
     } catch (error) {
       adminSessionReady.value = true
       adminAuthenticated.value = false
-      adminSessionExpiresAt.value = ''
       adminAuthError.value = parseError(error)
-      localRuntimeStatus.value = null
       setLocalBackendCsrfToken('')
       return null
     }
@@ -1486,12 +1496,10 @@ export function useOpencodeApp() {
     adminAuthError.value = ''
 
     try {
-      const session = await loginAdminSession(adminPassword.value.trim())
+      await loginAdminSession(adminPassword.value.trim())
       adminAuthenticated.value = true
       adminSessionReady.value = true
-      adminSessionExpiresAt.value = session.expiresAt
       adminPassword.value = ''
-      await refreshLocalRuntime()
       await connect()
       return true
     } catch (error) {
@@ -1512,10 +1520,8 @@ export function useOpencodeApp() {
 
     adminAuthenticated.value = false
     adminSessionReady.value = true
-    adminSessionExpiresAt.value = ''
     adminAuthError.value = ''
     adminPassword.value = ''
-    localRuntimeStatus.value = null
     setLocalBackendCsrfToken('')
     opencodeAuthRequested.value = false
     invalidateAuth()
@@ -1527,7 +1533,11 @@ export function useOpencodeApp() {
       return false
     }
 
-    await refreshLocalRuntime()
+    if (!hasOpenCodeConfig.value) {
+      opencodeAuthRequested.value = true
+      return false
+    }
+
     await connect()
     return true
   }
@@ -1535,6 +1545,12 @@ export function useOpencodeApp() {
   async function connect() {
     if (!adminAuthenticated.value) {
       adminAuthError.value = '请先完成管理端登录。'
+      return false
+    }
+
+    if (!hasOpenCodeConfig.value) {
+      opencodeAuthRequested.value = true
+      lastError.value = ''
       return false
     }
 
@@ -1552,7 +1568,6 @@ export function useOpencodeApp() {
       await startEventStream()
       authValidated.value = true
       opencodeAuthRequested.value = false
-      void refreshLocalRuntime()
 
       void Promise.allSettled([
         loadChatOptions(),
@@ -1577,46 +1592,6 @@ export function useOpencodeApp() {
       return false
     } finally {
       isConnecting.value = false
-    }
-  }
-
-  async function refreshLocalRuntime() {
-    try {
-      localRuntimeStatus.value = await getLocalRuntimeStatus()
-      return localRuntimeStatus.value
-    } catch {
-      localRuntimeStatus.value = null
-      return null
-    }
-  }
-
-  async function restartLocalOpencode() {
-    if (isRestartingOpencode.value) {
-      return false
-    }
-
-    isRestartingOpencode.value = true
-    streamReady.value = false
-    authValidated.value = false
-    clientCache.clear()
-    closeStream?.()
-    closeStream = null
-
-    try {
-      await restartManagedOpencode()
-      await refreshLocalRuntime()
-
-      const connected = await connect()
-      if (!connected) {
-        throw new Error(lastError.value || '本地 OpenCode 已重启，但重新连接失败。')
-      }
-
-      return true
-    } catch (error) {
-      lastError.value = parseError(error)
-      return false
-    } finally {
-      isRestartingOpencode.value = false
     }
   }
 
@@ -1786,17 +1761,16 @@ export function useOpencodeApp() {
     }
   }
 
-  watch(serverUrl, (value) => writeStorage(STORAGE_KEYS.serverUrl, value))
-  watch([username, password], ([nextUsername, nextPassword], [prevUsername, prevPassword]) => {
-    if (nextUsername === prevUsername && nextPassword === prevPassword) {
+  watch([serverUrl, username, password], ([nextServerUrl, nextUsername, nextPassword], [prevServerUrl, prevUsername, prevPassword]) => {
+    if (nextServerUrl === prevServerUrl && nextUsername === prevUsername && nextPassword === prevPassword) {
       return
     }
 
-    opencodeAuthRequested.value = true
     invalidateAuth()
     lastError.value = ''
+    writeStorage(STORAGE_KEYS.serverUrl, nextServerUrl)
     writeStorage(STORAGE_KEYS.username, nextUsername)
-    writeSessionStorage(STORAGE_KEYS.password, nextPassword)
+    writeStorage(STORAGE_KEYS.password, nextPassword)
   })
   watch(selectedSessionId, (value) => writeStorage(STORAGE_KEYS.selectedSession, value))
   watch(draftDirectory, (value) => writeStorage(STORAGE_KEYS.draftDirectory, value))
@@ -1837,8 +1811,8 @@ export function useOpencodeApp() {
     password,
     adminAuthenticated,
     adminSessionReady,
-    adminSessionExpiresAt,
     isAdminAuthenticating,
+    hasOpenCodeConfig,
     hasAuthCredentials,
     notificationSupported,
     notificationPermission,
@@ -1875,13 +1849,11 @@ export function useOpencodeApp() {
     isLoadingSession,
     isRefreshing,
     isLoadingOlderMessages,
-    isRestartingOpencode,
     isSending,
     sessionStatus,
     lastError,
     streamReady,
     authValidated,
-    localRuntimeStatus,
     connectionStateLabel,
     canCreateSession,
     ensureSessionWorktreeInfo,
@@ -1899,9 +1871,7 @@ export function useOpencodeApp() {
     logoutAdmin,
     bootstrap,
     connect,
-    restartLocalOpencode,
     refreshAdminSession,
-    refreshLocalRuntime,
     refreshSessions,
     loadMoreProjectSessions,
     openSession,

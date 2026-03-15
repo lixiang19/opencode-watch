@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { KeyRound, RefreshCw, ShieldAlert } from 'lucide-vue-next'
+import { Link2, RefreshCw, ShieldAlert } from 'lucide-vue-next'
 
 import Button from '@/components/ui/button/Button.vue'
 import Input from '@/components/ui/input/Input.vue'
@@ -25,7 +25,16 @@ const canSubmit = computed(() => {
     return Boolean(app.adminPassword.trim())
   }
 
-  return Boolean(app.username.trim()) && Boolean(app.password.trim())
+  return Boolean(app.serverUrl.trim()) && Boolean(app.username.trim()) && Boolean(app.password.trim())
+})
+const titleText = computed(() => (isAdminMode.value ? '先输入站点密码' : '配置 OpenCode'))
+const kickerText = computed(() => (isAdminMode.value ? '管理端鉴权' : 'OpenCode 连接'))
+const submitText = computed(() => {
+  if (isAdminMode.value) {
+    return app.isAdminAuthenticating ? '验证中...' : '登录并继续'
+  }
+
+  return app.isConnecting ? '连接中...' : '保存并连接'
 })
 
 async function submitAuth() {
@@ -55,33 +64,41 @@ async function submitAuth() {
         <ShieldAlert class="h-5 w-5" />
       </div>
 
-      <p class="auth-gate-kicker">{{ isAdminMode ? '管理端鉴权' : 'OpenCode 认证' }}</p>
-      <h2 id="auth-gate-title">{{ isAdminMode ? '先完成管理登录' : '先完成账号验证' }}</h2>
+      <p class="auth-gate-kicker">{{ kickerText }}</p>
+      <h2 id="auth-gate-title">{{ titleText }}</h2>
       <p class="auth-gate-copy">{{ app.authGateMessage }}</p>
 
       <form class="auth-gate-form" @submit.prevent="submitAuth">
         <label v-if="!isAdminMode" class="settings-field">
-          <span>认证账号</span>
-          <Input v-model="app.username" placeholder="请输入账号" autocomplete="username" autofocus />
+          <span>OpenCode 地址</span>
+          <Input v-model="app.serverUrl" placeholder="https://opencode.example.com" autocomplete="url" autofocus />
+        </label>
+
+        <label v-if="!isAdminMode" class="settings-field">
+          <span>账号</span>
+          <Input v-model="app.username" placeholder="请输入账号" autocomplete="username" />
         </label>
 
         <label class="settings-field">
-          <span>{{ isAdminMode ? '管理密码' : '认证密码' }}</span>
+          <span>{{ isAdminMode ? '管理密码' : '密码' }}</span>
           <Input
             v-model="passwordModel"
             type="password"
-            :placeholder="isAdminMode ? '请输入管理密码' : '请输入认证密码'"
+            :placeholder="isAdminMode ? '请输入管理密码' : '请输入 OpenCode 密码'"
             autocomplete="current-password"
             :autofocus="isAdminMode"
           />
         </label>
 
-
+        <p v-if="!isAdminMode" class="auth-gate-note">
+          <Link2 class="h-4 w-4" />
+          这些 OpenCode 配置会直接保存在当前浏览器本地，之后可在设置页修改。
+        </p>
 
         <Button class="auth-gate-submit" type="submit" :disabled="!canSubmit || (isAdminMode ? app.isAdminAuthenticating : app.isConnecting)">
           <RefreshCw v-if="isAdminMode ? app.isAdminAuthenticating : app.isConnecting" class="h-4 w-4 animate-spin" />
           <ShieldAlert v-else class="h-4 w-4" />
-          {{ isAdminMode ? (app.isAdminAuthenticating ? '登录中...' : '登录并进入') : (app.isConnecting ? '验证中...' : '验证并进入') }}
+          {{ submitText }}
         </Button>
       </form>
     </section>
@@ -108,7 +125,7 @@ async function submitAuth() {
 
 .auth-gate-panel {
   position: relative;
-  width: min(100%, 27rem);
+  width: min(100%, 28rem);
   padding: 1.5rem;
   border: 1px solid var(--border);
   border-radius: 1.75rem;

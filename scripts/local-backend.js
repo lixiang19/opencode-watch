@@ -14,9 +14,6 @@ const distRoot = path.join(projectRoot, 'dist')
 
 const host = process.env.OPCHAT_BACKEND_HOST ?? '127.0.0.1'
 const port = parsePort(process.env.OPCHAT_BACKEND_PORT, 9001)
-const vitePort = parsePort(process.env.VITE_PORT, 9000)
-const opencodePort = parsePort(process.env.OPENCODE_SERVER_PORT, 4096)
-const opencodeRoot = process.env.OPENCODE_SERVER_ROOT ?? process.env.HOME ?? projectRoot
 const staticMode = (process.env.OPCHAT_STATIC_MODE ?? 'off').toLowerCase() === 'on'
 const statusCacheTtlMs = 3000
 const sessionTtlMs = 1000 * 60 * 60 * 24 * 7
@@ -34,16 +31,6 @@ const pendingStatusRequests = new Map()
 const adminSessions = new Map()
 const loginAttempts = new Map()
 
-let serverClosing = false
-let managedOpencodeChild = null
-let managedOpencodeExitPromise = null
-let managedOpencodeStartPromise = null
-let managedOpencodeRestartPromise = null
-let managedOpencodeExpectedStop = false
-let managedOpencodeRestarting = false
-let managedOpencodeLastError = ''
-let managedOpencodeLastStartAt = 0
-
 const server = http.createServer(async (request, response) => {
   try {
     const requestUrl = new URL(request.url || '/', `http://${host}:${port}`)
@@ -58,11 +45,6 @@ const server = http.createServer(async (request, response) => {
       return
     }
 
-    if (requestUrl.pathname === '/oc' || requestUrl.pathname.startsWith('/oc/')) {
-      await handleOpencodeProxy(request, response, requestUrl)
-      return
-    }
-
     if (staticMode) {
       await handleStaticRequest(response, requestUrl)
       return
@@ -74,34 +56,15 @@ const server = http.createServer(async (request, response) => {
   }
 })
 
-server.listen(port, host, async () => {
+server.listen(port, host, () => {
   console.log(`[local-backend] listening on http://${host}:${port}`)
   if (generatedAdminPassword) {
     console.log(`[local-backend] OPCHAT_ADMIN_PASSWORD 未设置，已生成临时管理密码：${generatedAdminPassword}`)
   }
-
-  try {
-    await ensureManagedOpencodeRunning('startup')
-  } catch (error) {
-    managedOpencodeLastError = error instanceof Error ? error.message : String(error)
-    console.error(`[local-backend] ${managedOpencodeLastError}`)
-  }
 })
 
 for (const signal of ['SIGINT', 'SIGTERM']) {
-  process.on(signal, async () => {
-    if (serverClosing) {
-      return
-    }
-
-    serverClosing = true
-
-    try {
-      await stopManagedOpencode('shutdown')
-    } catch (error) {
-      console.error(error instanceof Error ? error.message : String(error))
-    }
-
+  process.on(signal, () => {
     server.close(() => process.exit(0))
   })
 }
@@ -185,36 +148,20 @@ async function handleAdminApiRequest(request, response, requestUrl) {
     return
   }
 
-  if (request.method !== 'GET') {
-    const csrfError = validateCsrf(request, session)
-    if (csrfError) {
-      sendJson(response, 403, { error: csrfError })
-      return
-    }
-  }
-
-  if (request.method === 'GET' && requestUrl.pathname === '/api/admin/runtime') {
-    sendJson(response, 200, getRuntimeStatus())
+  if (request.method !== 'POST') {
+    sendJson(response, 405, { error: 'Method not allowed' })
     return
   }
 
-  if (request.method !== 'POST') {
-    sendJson(response, 405, { error: 'Method not allowed' })
+  const csrfError = validateCsrf(request, session)
+  if (csrfError) {
+    sendJson(response, 403, { error: csrfError })
     return
   }
 
   const body = await readJsonBody(request)
 
   switch (requestUrl.pathname) {
-    case '/api/admin/opencode/restart': {
-      await restartManagedOpencode()
-      sendJson(response, 200, {
-        ok: true,
-        managedBaseUrl: managedOpencodeBaseUrl(),
-        restartedAt: new Date().toISOString()
-      })
-      return
-    }
     case '/api/admin/git/status': {
       const directory = requireString(body.directory, 'directory')
       const status = await getGitStatus(directory)
@@ -273,27 +220,6 @@ async function handleAdminApiRequest(request, response, requestUrl) {
   }
 }
 
-function getRuntimeStatus() {
-  return {
-    ok: true,
-    backend: {
-      host,
-      port,
-      staticMode
-    },
-    managedOpencode: {
-      baseUrl: managedOpencodeBaseUrl(),
-      port: opencodePort,
-      root: opencodeRoot,
-      running: isManagedOpencodeRunning(),
-      restarting: managedOpencodeRestarting,
-      pid: managedOpencodeChild?.pid ?? null,
-      lastError: managedOpencodeLastError || null,
-      lastStartAt: managedOpencodeLastStartAt ? new Date(managedOpencodeLastStartAt).toISOString() : null
-    }
-  }
-}
-
 async function handleStaticRequest(response, requestUrl) {
   const pathname = decodeURIComponent(requestUrl.pathname)
   const filePath = resolveStaticPath(pathname)
@@ -312,60 +238,6 @@ async function handleStaticRequest(response, requestUrl) {
   }
 
   sendFile(response, finalPath)
-}
-
-async function handleOpencodeProxy(request, response, requestUrl) {
-  const session = requireAdminSession(request, response)
-  if (!session) {
-    return
-  }
-
-  touchAdminSession(session.id)
-  await ensureManagedOpencodeRunning('proxy-request')
-
-  const upstreamPath = buildOpencodeProxyPath(requestUrl)
-  const proxyRequest = http.request(
-    {
-      protocol: 'http:',
-      hostname: '127.0.0.1',
-      port: opencodePort,
-      method: request.method,
-      path: upstreamPath,
-      headers: {
-        ...request.headers,
-        host: `127.0.0.1:${opencodePort}`
-      }
-    },
-    (proxyResponse) => {
-      response.writeHead(proxyResponse.statusCode ?? 502, proxyResponse.headers)
-      proxyResponse.pipe(response)
-    }
-  )
-
-  proxyRequest.on('error', (error) => {
-    if (response.headersSent) {
-      response.destroy(error)
-      return
-    }
-
-    sendJson(response, 502, { error: `OpenCode 代理失败：${error.message}` })
-  })
-
-  request.on('aborted', () => {
-    proxyRequest.destroy()
-  })
-  response.on('close', () => {
-    if (!response.writableEnded) {
-      proxyRequest.destroy()
-    }
-  })
-
-  request.pipe(proxyRequest)
-}
-
-function buildOpencodeProxyPath(requestUrl) {
-  const pathname = requestUrl.pathname === '/oc' ? '/' : requestUrl.pathname.slice('/oc'.length) || '/'
-  return `${pathname}${requestUrl.search}`
 }
 
 function requireAdminSession(request, response) {
@@ -595,176 +467,6 @@ function contentTypeByExtension(extension) {
   }
 }
 
-function managedOpencodeBaseUrl() {
-  return `http://127.0.0.1:${opencodePort}`
-}
-
-function isManagedOpencodeRunning() {
-  return Boolean(managedOpencodeChild && managedOpencodeChild.exitCode === null && !managedOpencodeChild.killed)
-}
-
-function managedOpencodeCorsOrigins() {
-  const origins = new Set([
-    `http://127.0.0.1:${vitePort}`,
-    `http://localhost:${vitePort}`,
-    `http://127.0.0.1:${port}`,
-    `http://localhost:${port}`
-  ])
-
-  return [...origins]
-}
-
-async function ensureManagedOpencodeRunning(reason) {
-  if (managedOpencodeStartPromise) {
-    return managedOpencodeStartPromise
-  }
-
-  if (isManagedOpencodeRunning()) {
-    return
-  }
-
-  managedOpencodeStartPromise = startManagedOpencode(reason).finally(() => {
-    managedOpencodeStartPromise = null
-  })
-
-  return managedOpencodeStartPromise
-}
-
-async function startManagedOpencode(reason) {
-  managedOpencodeLastError = ''
-  managedOpencodeExpectedStop = false
-
-  const args = [
-    'serve',
-    '--hostname=127.0.0.1',
-    `--port=${opencodePort}`
-  ]
-
-  for (const origin of managedOpencodeCorsOrigins()) {
-    args.push('--cors', origin)
-  }
-
-  const child = spawn('opencode', args, {
-    cwd: opencodeRoot,
-    stdio: 'inherit',
-    env: process.env
-  })
-
-  managedOpencodeChild = child
-  managedOpencodeLastStartAt = Date.now()
-
-  let spawnError = null
-  child.once('error', (error) => {
-    spawnError = error
-    managedOpencodeLastError = `无法启动 opencode：${error.message}`
-    if (managedOpencodeChild === child) {
-      managedOpencodeChild = null
-    }
-  })
-
-  managedOpencodeExitPromise = new Promise((resolve) => {
-    child.once('exit', (code, signal) => {
-      const exitedUnexpectedly = !managedOpencodeExpectedStop && !serverClosing
-      managedOpencodeChild = null
-      managedOpencodeExitPromise = null
-
-      if (exitedUnexpectedly) {
-        managedOpencodeLastError = `OpenCode 进程已退出（code=${code ?? 'null'}, signal=${signal ?? 'null'}）。`
-        setTimeout(() => {
-          if (!serverClosing) {
-            void ensureManagedOpencodeRunning('auto-restart').catch((error) => {
-              managedOpencodeLastError = error instanceof Error ? error.message : String(error)
-              console.error(`[local-backend] ${managedOpencodeLastError}`)
-            })
-          }
-        }, 500)
-      }
-
-      resolve({ code, signal })
-    })
-  })
-
-  console.log(`[local-backend] starting managed opencode (${reason}) on ${managedOpencodeBaseUrl()}`)
-  await waitForManagedOpencodeReady(child, () => spawnError)
-}
-
-async function stopManagedOpencode(reason) {
-  if (!managedOpencodeChild) {
-    return
-  }
-
-  const child = managedOpencodeChild
-  managedOpencodeExpectedStop = true
-  console.log(`[local-backend] stopping managed opencode (${reason})`)
-  child.kill('SIGTERM')
-
-  const exitResult = await Promise.race([
-    managedOpencodeExitPromise,
-    wait(5000).then(() => 'timeout')
-  ])
-
-  if (exitResult === 'timeout' && managedOpencodeChild === child) {
-    child.kill('SIGKILL')
-    await managedOpencodeExitPromise
-  }
-}
-
-async function restartManagedOpencode() {
-  if (managedOpencodeRestartPromise) {
-    return managedOpencodeRestartPromise
-  }
-
-  managedOpencodeRestartPromise = (async () => {
-    managedOpencodeRestarting = true
-    managedOpencodeLastError = ''
-
-    try {
-      await stopManagedOpencode('restart')
-      await ensureManagedOpencodeRunning('restart')
-    } catch (error) {
-      managedOpencodeLastError = error instanceof Error ? error.message : String(error)
-      throw error
-    } finally {
-      managedOpencodeRestarting = false
-      managedOpencodeRestartPromise = null
-    }
-  })()
-
-  return managedOpencodeRestartPromise
-}
-
-async function waitForManagedOpencodeReady(child, getSpawnError) {
-  const deadline = Date.now() + 30000
-
-  while (Date.now() < deadline) {
-    const spawnError = getSpawnError()
-    if (spawnError) {
-      throw new Error(`无法启动 opencode：${spawnError.message}`)
-    }
-
-    if (child.exitCode !== null || child.killed || managedOpencodeChild !== child) {
-      throw new Error('opencode 进程启动后立即退出。')
-    }
-
-    if (await canReachManagedOpencode()) {
-      return
-    }
-
-    await wait(400)
-  }
-
-  throw new Error('等待 opencode 就绪超时。')
-}
-
-async function canReachManagedOpencode() {
-  try {
-    const response = await fetch(`${managedOpencodeBaseUrl()}/global/health`)
-    return response.status < 500
-  } catch {
-    return false
-  }
-}
-
 function readJsonBody(request) {
   return new Promise((resolve, reject) => {
     let raw = ''
@@ -933,8 +635,4 @@ function clearStatusCache(directories) {
 function parsePort(value, fallback) {
   const parsed = Number.parseInt(value ?? '', 10)
   return Number.isInteger(parsed) && parsed >= 1 && parsed <= 65535 ? parsed : fallback
-}
-
-function wait(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms))
 }

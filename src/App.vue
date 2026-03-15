@@ -1,14 +1,19 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { RouterView } from 'vue-router'
 
 import AuthGateDialog from '@/components/auth/AuthGateDialog.vue'
 import { useTheme } from '@/composables/useTheme'
+import { useOpencodeStore } from '@/stores/opencode'
 
 useTheme()
+
+const app = useOpencodeStore()
+const canRenderAppShell = computed(() => app.adminSessionReady && app.adminAuthenticated)
 </script>
 
 <template>
-  <RouterView />
+  <RouterView v-if="canRenderAppShell" />
   <AuthGateDialog />
 </template>
 

@@ -21,10 +21,6 @@ export default defineConfig({
       '/api/auth': {
         target: 'http://127.0.0.1:9001',
         changeOrigin: false
-      },
-      '/oc': {
-        target: 'http://127.0.0.1:9001',
-        changeOrigin: false
       }
     }
   }

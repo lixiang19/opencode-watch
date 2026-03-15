@@ -8,25 +8,6 @@ export interface GitDirectoryStatus {
   isLinkedWorktree: boolean
 }
 
-export interface LocalRuntimeStatus {
-  ok: true
-  backend: {
-    host: string
-    port: number
-    staticMode: boolean
-  }
-  managedOpencode: {
-    baseUrl: string
-    port: number
-    root: string
-    running: boolean
-    restarting: boolean
-    pid: number | null
-    lastError: string | null
-    lastStartAt: string | null
-  }
-}
-
 export interface AdminSessionStatus {
   authenticated: boolean
   username?: string
@@ -114,14 +95,6 @@ export async function logoutAdminSession() {
   const payload = await postJson<{ ok: true }>(AUTH_BACKEND_BASE, '/logout', {}, true)
   setLocalBackendCsrfToken('')
   return payload
-}
-
-export function getLocalRuntimeStatus() {
-  return requestLocalBackend<LocalRuntimeStatus>(ADMIN_BACKEND_BASE, '/runtime')
-}
-
-export function restartManagedOpencode() {
-  return postJson<{ ok: true; managedBaseUrl: string; restartedAt: string }>(ADMIN_BACKEND_BASE, '/opencode/restart', {}, true)
 }
 
 export function getGitDirectoryStatus(directory: string) {
