@@ -23,7 +23,6 @@ import {
   INITIAL_HISTORY_LIMIT,
   MOBILE_SESSION_CACHE_LIMIT,
   PROJECT_SESSION_PAGE_SIZE,
-  RECENT_PROJECT_WINDOW,
   SESSION_LIST_LIMIT,
   STORAGE_KEYS
 } from '@/composables/useOpencodeApp/constants'
@@ -410,11 +409,8 @@ export function useOpencodeApp() {
   }
 
   const projects = computed<ProjectRecord[]>(() => {
-    const cutoff = Date.now() - RECENT_PROJECT_WINDOW
-    const groups = new Map<string, ProjectRecord>()
-
-    for (const project of projectCatalog.value) {
-      groups.set(getProjectIdentityKey(project.projectId, project.directory), {
+    return projectCatalog.value.map((project) => {
+      return {
         projectId: project.projectId,
         directory: project.directory,
         name: project.name,
@@ -422,58 +418,8 @@ export function useOpencodeApp() {
         lastUpdated: project.lastUpdated,
         sessionCount: 0,
         source: 'server'
-      })
-    }
-
-    for (const session of sessions.value) {
-      const grouping = getSessionProjectGrouping(session)
-      if (!grouping) {
-        continue
       }
-
-      const existing = groups.get(grouping.key)
-      const updated = session.time?.updated ?? session.time?.created ?? 0
-      if (existing) {
-        existing.projectId = existing.projectId || grouping.projectId
-        existing.icon = existing.icon || grouping.icon
-        existing.sessionCount += 1
-        existing.lastUpdated = Math.max(existing.lastUpdated, updated)
-        if (existing.source !== 'manual') {
-          existing.source = 'session'
-        }
-      } else {
-        groups.set(grouping.key, {
-          projectId: grouping.projectId,
-          directory: grouping.directory,
-          name: grouping.name,
-          icon: grouping.icon,
-          lastUpdated: updated,
-          sessionCount: 1,
-          source: 'session'
-        })
-      }
-    }
-
-    const manualDirectory = normalizeDirectory(draftDirectory.value)
-    const manualKey = getProjectIdentityKey('', manualDirectory)
-    const hasSameDirectory = manualDirectory
-      ? Array.from(groups.values()).some((project) => normalizeDirectory(project.directory) === manualDirectory)
-      : false
-
-    if (manualDirectory && !groups.has(manualKey) && !hasSameDirectory) {
-      groups.set(manualKey, {
-        directory: manualDirectory,
-        name: getDirectoryName(manualDirectory),
-        lastUpdated: Date.now(),
-        sessionCount: 0,
-        source: 'manual',
-        manual: true
-      })
-    }
-
-    return Array.from(groups.values())
-      .filter((project) => project.manual || project.lastUpdated >= cutoff)
-      .sort((left, right) => right.lastUpdated - left.lastUpdated)
+    })
   })
 
   const connectionStateLabel = computed(() => {
@@ -1277,7 +1223,7 @@ export function useOpencodeApp() {
 
   async function listGlobalSessions() {
     const sessions = await fetchExperimentalSessions({ limit: SESSION_LIST_LIMIT })
-    return sortSessionsByUpdated(sessions.filter((session) => !session.parentID))
+    return sortSessionsByUpdated(sessions)
   }
 
   async function loadMoreProjectSessions(directory: string) {
@@ -1302,11 +1248,11 @@ export function useOpencodeApp() {
     lastError.value = ''
 
     try {
-      const nextSessions = (await fetchExperimentalSessions({
+      const nextSessions = await fetchExperimentalSessions({
         directory: normalizedDirectory,
         cursor: oldestLoadedAt || undefined,
         limit: PROJECT_SESSION_PAGE_SIZE
-      })).filter((session) => !session.parentID)
+      })
 
       await preloadSessionGitStatuses(nextSessions)
       mergeSessions(nextSessions)
@@ -1387,8 +1333,6 @@ export function useOpencodeApp() {
         options.refreshProjects ? currentClient.project.list() : Promise.resolve({ data: null })
       ])
       const nextSessions = globalSessions
-        .filter((session) => !session.parentID)
-        .sort((left, right) => getSessionUpdatedAt(right) - getSessionUpdatedAt(left))
 
       if (projectResult.data) {
         projectCatalog.value = ((projectResult.data ?? []) as Project[])
