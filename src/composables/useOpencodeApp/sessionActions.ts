@@ -74,6 +74,30 @@ export function createSessionActions(args: {
   suppressNextChatOptionLoad: (directory?: string) => void
   syncSessionPreviewFromMessages: (sessionId: string, nextMessages: ChatMessageRecord[]) => void
 }) {
+  function buildOptimisticSessionRecord(session: {
+    id: string
+    title?: string
+    parentID?: string | null
+    time?: {
+      created?: number
+      updated?: number
+    } | null
+  }, directory: string): SessionRecord {
+    const createdAt = session.time?.created ?? Date.now()
+    const updatedAt = session.time?.updated ?? createdAt
+
+    return {
+      id: session.id,
+      title: session.title,
+      directory,
+      parentID: session.parentID,
+      time: {
+        created: createdAt,
+        updated: updatedAt
+      }
+    }
+  }
+
   function getSessionDirectory(sessionId?: string) {
     if (!sessionId) {
       return ''
@@ -431,20 +455,15 @@ export function createSessionActions(args: {
         throw new Error('创建会话失败。')
       }
 
-      args.mergeSessions([
-        {
-          id: session.id,
-          title: session.title,
-          directory,
-          parentID: session.parentID,
-          time: {
-            created: session.time?.created ?? Date.now(),
-            updated: session.time?.updated ?? session.time?.created ?? Date.now()
-          }
-        }
-      ])
+      const optimisticSession = buildOptimisticSessionRecord(session, directory)
+
+      args.mergeSessions([optimisticSession])
 
       await args.refreshSessions({ reopen: false })
+
+      if (!args.sessions.value.some((item) => item.id === session.id)) {
+        args.mergeSessions([optimisticSession])
+      }
 
       if (options.openInSingleChat !== false) {
         await openSession(session.id)
@@ -502,7 +521,14 @@ export function createSessionActions(args: {
           throw new Error('创建 worktree 对话失败。')
         }
 
+        const optimisticSession = buildOptimisticSessionRecord(session, worktreeDirectory)
+        args.mergeSessions([optimisticSession])
+
         await args.refreshSessions({ reopen: false })
+
+        if (!args.sessions.value.some((item) => item.id === session.id)) {
+          args.mergeSessions([optimisticSession])
+        }
 
         if (options.openInSingleChat !== false) {
           await openSession(session.id)
@@ -599,9 +625,14 @@ export function createSessionActions(args: {
       : undefined
     const agent = args.selectedAgent.value?.id || undefined
     const variant = args.selectedVariant.value || undefined
+    const previousComposerText = args.composerText.value
+    const previousCommandName = args.selectedCommandName.value
     args.isSending.value = true
     args.sessionStatus.value = 'busy'
     args.lastError.value = ''
+    args.composerText.value = ''
+    args.selectedCommandName.value = ''
+    args.composerMode.value = 'prompt'
 
     const cachedSession = args.getCachedSessionState(args.selectedSessionId.value)
     if (cachedSession) {
@@ -636,15 +667,18 @@ export function createSessionActions(args: {
         currentSessionId,
         hasCommand ? `/${commandName}${commandArgs ? ` ${commandArgs}` : ''}` : getPromptSummary(trimmedPrompt, images.length)
       )
-      args.composerText.value = ''
-      args.selectedCommandName.value = ''
-      args.composerMode.value = 'prompt'
       return true
     } catch (error) {
       args.clearPendingCompletionNotice(args.selectedSessionId.value)
       args.handleRequestError(error)
       args.isSending.value = false
       args.sessionStatus.value = 'idle'
+      if (!args.composerText.value) {
+        args.composerText.value = previousComposerText
+      }
+      if (!args.selectedCommandName.value && previousCommandName) {
+        args.selectedCommandName.value = previousCommandName
+      }
       const nextCachedSession = args.getCachedSessionState(args.selectedSessionId.value)
       if (nextCachedSession) {
         nextCachedSession.sessionStatus = 'idle'

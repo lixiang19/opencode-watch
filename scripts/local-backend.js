@@ -845,7 +845,8 @@ async function getGitStatus(directory) {
   }
 
   const request = runGit(['-C', directory, 'status', '--porcelain=v1', '--branch'])
-    .then((result) => {
+    .then(async (result) => {
+      const repositoryInfo = await getGitRepositoryInfo(directory)
       const lines = result.stdout.split(/\r?\n/).filter(Boolean)
       const branchLine = lines[0] ?? ''
       const branch = parseBranchName(branchLine)
@@ -854,7 +855,11 @@ async function getGitStatus(directory) {
       const nextStatus = {
         branch,
         dirty: changedLines.length > 0,
-        changedCount: changedLines.length
+        changedCount: changedLines.length,
+        worktreeRoot: repositoryInfo.worktreeRoot,
+        mainWorktreeRoot: repositoryInfo.mainWorktreeRoot,
+        isWorktreeRoot: repositoryInfo.isWorktreeRoot,
+        isLinkedWorktree: repositoryInfo.isLinkedWorktree
       }
 
       statusCache.set(directory, {
@@ -883,6 +888,35 @@ function parseBranchName(branchLine) {
   }
 
   return raw.split('...')[0]?.trim() || raw.trim()
+}
+
+async function getGitRepositoryInfo(directory) {
+  const result = await runGit(['-C', directory, 'rev-parse', '--show-toplevel', '--git-dir', '--git-common-dir'])
+  const [worktreeRootRaw = '', gitDirRaw = '', commonDirRaw = ''] = result.stdout
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+
+  const requestedDirectory = path.resolve(directory)
+  const worktreeRoot = path.resolve(worktreeRootRaw)
+  const gitDir = resolveGitPath(directory, gitDirRaw)
+  const commonDir = resolveGitPath(directory, commonDirRaw)
+  const mainWorktreeRoot = path.basename(commonDir) === '.git' ? path.dirname(commonDir) : worktreeRoot
+
+  return {
+    worktreeRoot,
+    mainWorktreeRoot,
+    isWorktreeRoot: requestedDirectory === worktreeRoot,
+    isLinkedWorktree: gitDir !== commonDir
+  }
+}
+
+function resolveGitPath(directory, rawPath) {
+  if (!rawPath) {
+    return ''
+  }
+
+  return path.isAbsolute(rawPath) ? path.resolve(rawPath) : path.resolve(directory, rawPath)
 }
 
 function clearStatusCache(directories) {

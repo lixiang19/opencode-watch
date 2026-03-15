@@ -41,13 +41,14 @@ const availableModels = computed(() => (props.sessionId ? desktopSession.value?.
 const availableCommands = computed(() => (props.sessionId ? desktopSession.value?.availableCommands ?? [] : app.availableCommands))
 const isSending = computed(() => (props.sessionId ? Boolean(desktopSession.value?.isSending) : app.isSending))
 
-const disabled = computed(() => {
+const controlsDisabled = computed(() => {
   if (props.sessionId) {
     return !app.streamReady || Boolean(desktopSession.value?.isSending)
   }
 
   return !app.streamReady || app.isSending
 })
+const textareaDisabled = computed(() => !app.streamReady)
 const canChooseAgent = computed(() => availableAgents.value.length > 0)
 const canChooseModel = computed(() => availableModels.value.length > 0)
 const hasCommandOptions = computed(() => availableCommands.value.length > 0)
@@ -55,9 +56,13 @@ const selectedAgentValue = computed(() => (props.sessionId ? desktopSession.valu
 const selectedModelValue = computed(() => (props.sessionId ? desktopSession.value?.selectedModelKey || undefined : app.selectedModelKey || undefined))
 const selectedVariantValue = computed(() => (props.sessionId ? desktopSession.value?.selectedVariant || undefined : app.selectedVariant || undefined))
 const selectedCommandValue = computed(() => (props.sessionId ? desktopSession.value?.selectedCommandName || undefined : app.selectedCommandName || undefined))
+const selectedAgentDetail = computed(() => {
+  return availableAgents.value.find((agent) => agent.id === selectedAgentValue.value) ?? null
+})
 const selectedModelDetail = computed(() => {
   return availableModels.value.find((model) => model.key === selectedModelValue.value) ?? null
 })
+const selectedAgentLabel = computed(() => selectedAgentDetail.value?.id || '默认')
 const currentVariants = computed(() => selectedModelDetail.value?.variants ?? [])
 const canChooseVariant = computed(() => currentVariants.value.length > 0)
 const currentMessages = computed(() => (props.sessionId ? desktopSession.value?.messages ?? [] : app.messages))
@@ -88,15 +93,14 @@ const hasSelectedCommand = computed(() => Boolean(selectedCommandValue.value))
 const hasAttachedImages = computed(() => attachedImages.value.length > 0)
 const hasAdvancedSelections = computed(() => {
   return Boolean(
-    selectedAgentValue.value ||
-      selectedModelValue.value ||
+    selectedModelValue.value ||
       selectedVariantValue.value ||
       selectedCommandValue.value
   )
 })
-const canAttachImages = computed(() => !disabled.value && !hasSelectedCommand.value)
+const canAttachImages = computed(() => !controlsDisabled.value && !hasSelectedCommand.value)
 const canSend = computed(() => {
-  return !disabled.value && (Boolean(composerValue.value.trim()) || hasSelectedCommand.value || hasAttachedImages.value)
+  return !controlsDisabled.value && (Boolean(composerValue.value.trim()) || hasSelectedCommand.value || hasAttachedImages.value)
 })
 const canStop = computed(() => isSending.value)
 const latestUsage = computed(() => {
@@ -157,6 +161,10 @@ function syncTextareaHeight() {
 
   textarea.style.height = '0px'
   textarea.style.height = `${Math.min(textarea.scrollHeight, 220)}px`
+}
+
+function focusComposer() {
+  nextTick(() => textareaEl.value?.focus())
 }
 
 function createAttachmentId() {
@@ -325,22 +333,43 @@ function handleComposerInput(value: string) {
 
 async function handleSend() {
   if (props.sessionId) {
-    const text = localText.value.trim()
-    if (!text && !hasSelectedCommand.value && !hasAttachedImages.value) {
+    const prompt = localText.value
+    const text = prompt.trim()
+    const images = [...attachedImages.value]
+    const commandName = selectedCommandValue.value || ''
+    if (!text && !commandName && !images.length) {
       return
     }
 
-    const result = await app.sendDesktopMessage(props.sessionId, text, attachedImages.value)
-    if (result.sent) {
-      localText.value = ''
-      clearImages()
+    localText.value = ''
+    clearImages()
+    if (commandName) {
+      app.selectDesktopCommand(props.sessionId, '')
+    }
+    focusComposer()
+
+    const result = await app.sendDesktopMessage(props.sessionId, prompt, images)
+    if (!result.sent) {
+      if (!localText.value) {
+        localText.value = prompt
+      }
+      if (!attachedImages.value.length && images.length) {
+        attachedImages.value = images
+      }
+      if (!selectedCommandValue.value && commandName) {
+        app.selectDesktopCommand(props.sessionId, commandName)
+      }
     }
     return
   }
 
-  const sent = await app.sendCurrentMessage(attachedImages.value)
-  if (sent) {
-    clearImages()
+  const images = [...attachedImages.value]
+  clearImages()
+  focusComposer()
+
+  const sent = await app.sendCurrentMessage(images)
+  if (!sent && !attachedImages.value.length && images.length) {
+    attachedImages.value = images
   }
 }
 
@@ -375,8 +404,15 @@ function handleComposerKeydown(event: KeyboardEvent) {
     return
   }
 
-  event.preventDefault()
-  void handlePrimaryAction()
+  if (canSend.value) {
+    event.preventDefault()
+    void handleSend()
+    return
+  }
+
+  if (!canStop.value) {
+    event.preventDefault()
+  }
 }
 
 watch(composerValue, () => {
@@ -406,7 +442,7 @@ onMounted(() => {
               <button
                 type="button"
                 class="composer-attachment-remove"
-                :disabled="disabled"
+                :disabled="controlsDisabled"
                 :aria-label="`移除 ${image.filename}`"
                 @click="removeImage(image.id)"
               >
@@ -445,7 +481,7 @@ onMounted(() => {
                 <button
                   type="button"
                   class="composer-chip-clear"
-                  :disabled="disabled"
+                  :disabled="controlsDisabled"
                   aria-label="清除命令"
                   @click="clearSelectedCommand"
                 >
@@ -460,7 +496,7 @@ onMounted(() => {
           <textarea
             ref="textareaEl"
             :value="composerValue"
-            :disabled="disabled"
+            :disabled="textareaDisabled"
             :placeholder="hasSelectedCommand ? '可直接发送命令，或补充说明…' : '写点什么。。。'"
             class="composer-input soft-scrollbar"
             rows="1"
@@ -468,6 +504,26 @@ onMounted(() => {
             @keydown="handleComposerKeydown"
           />
         </div>
+        <Select
+          v-if="canChooseAgent"
+          :model-value="selectedAgentValue"
+          :disabled="controlsDisabled"
+          @update:model-value="handleAgentChange"
+        >
+          <SelectTrigger class="composer-agent-trigger" aria-label="切换 Agent">
+            <span class="composer-agent-trigger-inner">
+              <span class="composer-agent-trigger-label">Agent</span>
+              <span class="composer-agent-trigger-value">{{ selectedAgentLabel }}</span>
+            </span>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem :value="DEFAULT_AGENT_VALUE">默认 Agent</SelectItem>
+            <SelectItem v-for="agent in availableAgents" :key="agent.id" :value="agent.id">
+              {{ agent.id }}
+            </SelectItem>
+          </SelectContent>
+        </Select>
+        <span v-else class="composer-agent-fallback">默认 Agent</span>
         <button
           type="button"
           class="btn-tool btn-settings"
@@ -494,26 +550,8 @@ onMounted(() => {
       <div v-if="showAdvancedControls" class="composer-advanced">
         <div class="composer-selects composer-selects-compact">
           <Select
-            v-if="canChooseAgent"
-            :model-value="selectedAgentValue"
-            :disabled="disabled"
-            @update:model-value="handleAgentChange"
-          >
-            <SelectTrigger class="composer-select composer-select-agent">
-              <SelectValue placeholder="默认 Agent" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem :value="DEFAULT_AGENT_VALUE">默认 Agent</SelectItem>
-              <SelectItem v-for="agent in availableAgents" :key="agent.id" :value="agent.id">
-                {{ agent.id }}
-              </SelectItem>
-            </SelectContent>
-          </Select>
-          <span v-else class="composer-select-empty">默认 Agent</span>
-
-          <Select
             :model-value="selectedCommandValue"
-            :disabled="disabled || !hasCommandOptions"
+            :disabled="controlsDisabled || !hasCommandOptions"
             @update:model-value="handleCommandChange"
           >
             <SelectTrigger class="composer-select composer-select-cmd">
@@ -533,7 +571,7 @@ onMounted(() => {
           <Select
             v-if="canChooseModel"
             :model-value="selectedModelValue"
-            :disabled="disabled"
+            :disabled="controlsDisabled"
             @update:model-value="handleModelChange"
           >
             <SelectTrigger class="composer-select composer-select-model">
@@ -551,7 +589,7 @@ onMounted(() => {
           <Select
             v-if="canChooseVariant"
             :model-value="selectedVariantValue"
-            :disabled="disabled"
+            :disabled="controlsDisabled"
             @update:model-value="handleVariantChange"
           >
             <SelectTrigger class="composer-select composer-select-variant">
@@ -611,8 +649,56 @@ onMounted(() => {
   flex: 1 1 8rem;
 }
 
-.composer-select-agent {
-  max-width: 10rem;
+.composer-agent-trigger,
+.composer-agent-fallback {
+  flex-shrink: 0;
+  width: 7.5rem;
+  height: 2rem;
+  border-radius: 0.625rem;
+}
+
+.composer-agent-trigger {
+  padding-left: 0.625rem;
+  padding-right: 0.5rem;
+  box-shadow: none;
+}
+
+.composer-agent-trigger-inner {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  line-height: 1.05;
+}
+
+.composer-agent-trigger-label {
+  color: var(--muted-foreground);
+  font-size: 0.58rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.composer-agent-trigger-value {
+  display: block;
+  width: 100%;
+  overflow: hidden;
+  color: var(--foreground);
+  font-size: 0.76rem;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-agent-fallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--input);
+  background: var(--background);
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+  white-space: nowrap;
 }
 
 .composer-select-model {
@@ -901,6 +987,11 @@ onMounted(() => {
     padding: 0.375rem 0.625rem 0.625rem;
   }
 
+  .composer-agent-trigger,
+  .composer-agent-fallback {
+    width: 6.5rem;
+  }
+
   .composer-attachments {
     padding: 0.375rem 0.625rem 0;
   }
@@ -919,7 +1010,6 @@ onMounted(() => {
   }
 
   .composer-select,
-  .composer-select-agent,
   .composer-select-model,
   .composer-select-variant,
   .composer-select-cmd,

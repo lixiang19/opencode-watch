@@ -469,27 +469,22 @@ const installStatusText = computed(() => {
 /* 状态卡片 */
 .status-card {
   border-radius: 1.25rem;
-  border-left-width: 6px;
-  transition: all 0.3s ease;
+  transition: background 0.2s;
 }
 
 .status-ok {
-  border-left-color: var(--primary);
   background: color-mix(in srgb, var(--primary) 3%, var(--card));
 }
 
 .status-error {
-  border-left-color: var(--destructive);
   background: color-mix(in srgb, var(--destructive) 3%, var(--card));
 }
 
 .status-warn {
-  border-left-color: var(--ring);
   background: color-mix(in srgb, var(--ring) 6%, var(--card));
 }
 
 .status-muted {
-  border-left-color: var(--border);
   background: color-mix(in srgb, var(--muted) 36%, var(--card));
 }
 

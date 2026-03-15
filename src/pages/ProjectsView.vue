@@ -470,12 +470,12 @@ const editingPreviewIcon = computed(() => iconOverrideDraft.value || editingProj
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 1.75rem 1.5rem 1.25rem;
+  padding: 1.25rem 1.25rem 0.875rem;
   position: sticky;
   top: 0;
   z-index: 10;
   background: var(--background);
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  border-bottom: 1px solid var(--border);
 }
 
 .header-title {
@@ -493,14 +493,13 @@ const editingPreviewIcon = computed(() => iconOverrideDraft.value || editingProj
 }
 
 .count-badge {
-  font-size: 0.6875rem;
-  font-weight: 700;
-  background: color-mix(in srgb, var(--primary) 12%, transparent);
-  color: var(--primary);
-  border: 1px solid color-mix(in srgb, var(--primary) 25%, transparent);
-  padding: 0.15rem 0.55rem;
-  border-radius: 999px;
-  letter-spacing: 0.03em;
+  font-size: 0.72rem;
+  font-weight: 500;
+  background: var(--secondary);
+  color: var(--muted-foreground);
+  border: 1px solid var(--border);
+  padding: 0.1rem 0.4rem;
+  border-radius: 9999px;
 }
 
 /* ─────────────────────────────────────────
@@ -508,10 +507,10 @@ const editingPreviewIcon = computed(() => iconOverrideDraft.value || editingProj
 ───────────────────────────────────────── */
 .projects-content {
   flex: 1;
-  padding: 1.25rem 1.25rem 3rem;
+  padding: 1rem 1rem 3rem;
   overflow-y: auto;
   scrollbar-width: thin;
-  scrollbar-color: color-mix(in srgb, var(--primary) 22%, transparent) transparent;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
   -webkit-overflow-scrolling: touch;
 }
 
@@ -525,12 +524,12 @@ const editingPreviewIcon = computed(() => iconOverrideDraft.value || editingProj
 }
 
 .projects-content::-webkit-scrollbar-thumb {
-  background: color-mix(in srgb, var(--primary) 22%, transparent);
+  background: var(--scrollbar-thumb);
   border-radius: 9999px;
 }
 
 .projects-content::-webkit-scrollbar-thumb:hover {
-  background: color-mix(in srgb, var(--primary) 34%, transparent);
+  background: var(--scrollbar-thumb-hover);
 }
 
 .project-grid {
@@ -547,47 +546,27 @@ const editingPreviewIcon = computed(() => iconOverrideDraft.value || editingProj
 .project-card {
   display: flex;
   flex-direction: column;
-  border-radius: 0.875rem;
+  border-radius: var(--radius);
   border: 1px solid var(--border);
   background: var(--card);
   cursor: pointer;
   position: relative;
   overflow: hidden;
-  transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
-}
-
-/* 左侧高亮条 — 悬停时展开 */
-.project-card::before {
-  content: '';
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: 3px;
-  background: var(--primary);
-  border-radius: 0 2px 2px 0;
-  transform: scaleY(0);
-  transform-origin: center;
-  transition: transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
-}
-
-.project-card:hover::before {
-  transform: scaleY(1);
+  transition: border-color 0.1s, background 0.1s;
 }
 
 .project-card:hover {
-  border-color: color-mix(in srgb, var(--primary) 40%, var(--border));
-  box-shadow: 0 4px 16px -4px color-mix(in srgb, var(--primary) 15%, transparent),
-              0 1px 4px -1px rgba(0, 0, 0, 0.06);
-  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--foreground) 20%, var(--border));
+  background: var(--secondary);
 }
 
 /* 草稿卡片 */
 .draft-card {
   border-style: dashed;
-  background: color-mix(in srgb, var(--primary) 3%, var(--card));
 }
 
-.draft-card::before {
-  background: color-mix(in srgb, var(--muted-foreground) 70%, transparent);
+.draft-card:hover {
+  background: var(--secondary);
 }
 
 /* ─────────────────────────────────────────
@@ -595,23 +574,21 @@ const editingPreviewIcon = computed(() => iconOverrideDraft.value || editingProj
 ───────────────────────────────────────── */
 .project-edit-trigger {
   position: absolute;
-  top: 0.75rem;
-  right: 0.75rem;
+  top: 0.625rem;
+  right: 0.625rem;
   z-index: 2;
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
   border: 1px solid var(--border);
-  background: color-mix(in srgb, var(--card) 90%, transparent);
+  background: var(--card);
   color: var(--muted-foreground);
-  border-radius: 999px;
-  padding: 0.3rem 0.65rem;
+  border-radius: var(--radius);
+  padding: 0.25rem 0.5rem;
   font-size: 0.6875rem;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  backdrop-filter: blur(8px);
+  font-weight: 500;
   opacity: 0;
-  transition: opacity 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  transition: opacity 0.1s, border-color 0.1s, color 0.1s;
 }
 
 .project-card:hover .project-edit-trigger {
@@ -650,37 +627,31 @@ const editingPreviewIcon = computed(() => iconOverrideDraft.value || editingProj
    项目图标
 ───────────────────────────────────────── */
 .project-icon-box {
-  --project-icon-accent: var(--primary);
-  width: 2.75rem;
-  height: 2.75rem;
-  border-radius: 0.75rem;
-  background: var(--project-icon-accent);
-  color: var(--primary-foreground);
+  --project-icon-accent: var(--muted-foreground);
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--project-icon-accent) 18%, var(--secondary));
+  color: var(--project-icon-accent);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 1.125rem;
-  font-weight: 800;
+  font-size: 0.9rem;
+  font-weight: 700;
   flex-shrink: 0;
   overflow: hidden;
-  box-shadow: 0 2px 8px color-mix(in srgb, var(--project-icon-accent) 30%, transparent);
-  transition: box-shadow 0.18s ease;
-}
-
-.project-card:hover .project-icon-box {
-  box-shadow: 0 4px 12px color-mix(in srgb, var(--project-icon-accent) 40%, transparent);
+  border: 1px solid color-mix(in srgb, var(--project-icon-accent) 25%, var(--border));
 }
 
 .project-icon-box.draft {
-  background: color-mix(in srgb, var(--muted-foreground) 15%, var(--muted));
+  background: var(--secondary);
   color: var(--muted-foreground);
-  box-shadow: none;
+  border-color: var(--border);
 }
 
 .project-icon-box.preview {
-  width: 3.25rem;
-  height: 3.25rem;
-  border-radius: 0.875rem;
+  width: 3rem;
+  height: 3rem;
 }
 
 .project-icon-image {
@@ -754,8 +725,8 @@ const editingPreviewIcon = computed(() => iconOverrideDraft.value || editingProj
    卡片底部
 ───────────────────────────────────────── */
 .card-footer {
-  padding: 0.625rem 1.125rem 0.75rem 1.25rem;
-  border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  padding: 0.5rem 1rem 0.625rem;
+  border-top: 1px solid var(--border);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -833,16 +804,16 @@ const editingPreviewIcon = computed(() => iconOverrideDraft.value || editingProj
 }
 
 .hero-icon {
-  width: 4rem;
-  height: 4rem;
-  background: color-mix(in srgb, var(--primary) 10%, transparent);
-  border: 1px solid color-mix(in srgb, var(--primary) 20%, transparent);
-  border-radius: 1.125rem;
+  width: 3.5rem;
+  height: 3.5rem;
+  background: var(--secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
   display: flex;
   align-items: center;
   justify-content: center;
   margin-bottom: 1.5rem;
-  color: var(--primary);
+  color: var(--muted-foreground);
 }
 
 .empty-hero h2 {
@@ -877,21 +848,20 @@ const editingPreviewIcon = computed(() => iconOverrideDraft.value || editingProj
   align-items: center;
   justify-content: center;
   overflow-y: auto;
-  background: color-mix(in srgb, black 42%, transparent);
-  backdrop-filter: blur(6px);
+  background: rgba(0, 0, 0, 0.6);
 }
 
 .editor-card {
   width: min(100%, 30rem);
   max-height: min(calc(100vh - 4rem), 42rem);
-  border-radius: 1.25rem;
+  border-radius: var(--radius);
   padding: 0;
-  background: var(--card);
-  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  background: var(--popover);
+  border: 1px solid var(--border);
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 20px 60px -12px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(255,255,255,0.04);
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.4);
 }
 
 .editor-body {
@@ -931,10 +901,10 @@ const editingPreviewIcon = computed(() => iconOverrideDraft.value || editingProj
   display: flex;
   align-items: center;
   gap: 1rem;
-  padding: 0.875rem 1rem;
-  border-radius: 0.875rem;
-  background: color-mix(in srgb, var(--muted) 35%, transparent);
-  border: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
+  padding: 0.75rem;
+  border-radius: var(--radius);
+  background: var(--secondary);
+  border: 1px solid var(--border);
 }
 
 .editor-preview-copy {
@@ -979,8 +949,8 @@ const editingPreviewIcon = computed(() => iconOverrideDraft.value || editingProj
   display: flex;
   gap: 0.625rem;
   padding: 1rem 1.375rem 1.375rem;
-  background: var(--card);
-  border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  background: var(--popover);
+  border-top: 1px solid var(--border);
   margin-top: 1.25rem;
 }
 
@@ -1000,26 +970,25 @@ const editingPreviewIcon = computed(() => iconOverrideDraft.value || editingProj
   align-items: center;
   justify-content: center;
   gap: 0.4rem;
-  min-height: 2.5rem;
-  padding: 0.625rem;
-  border-radius: 0.75rem;
-  border: 1px solid color-mix(in srgb, var(--chip-color) 20%, var(--border));
-  background: color-mix(in srgb, var(--chip-color) 7%, var(--card));
+  min-height: 2.25rem;
+  padding: 0.5rem;
+  border-radius: var(--radius);
+  border: 1px solid color-mix(in srgb, var(--chip-color) 25%, var(--border));
+  background: color-mix(in srgb, var(--chip-color) 8%, var(--secondary));
   color: var(--foreground);
-  font-size: 0.78125rem;
-  font-weight: 600;
-  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+  font-size: 0.75rem;
+  font-weight: 500;
+  transition: border-color 0.1s, background 0.1s;
 }
 
 .color-chip:hover {
   border-color: color-mix(in srgb, var(--chip-color) 55%, var(--border));
-  background: color-mix(in srgb, var(--chip-color) 12%, var(--card));
+  background: color-mix(in srgb, var(--chip-color) 14%, var(--secondary));
 }
 
 .color-chip.active {
   border-color: var(--chip-color);
-  background: color-mix(in srgb, var(--chip-color) 14%, var(--card));
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--chip-color) 16%, transparent);
+  background: color-mix(in srgb, var(--chip-color) 16%, var(--secondary));
 }
 
 .color-dot {
@@ -1076,7 +1045,7 @@ const editingPreviewIcon = computed(() => iconOverrideDraft.value || editingProj
   .editor-card {
     width: 100%;
     max-height: calc(92vh - env(safe-area-inset-bottom));
-    border-radius: 1.25rem 1.25rem 0 0;
+    border-radius: var(--radius) var(--radius) 0 0;
   }
 
   .editor-body {

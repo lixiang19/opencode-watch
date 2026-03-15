@@ -49,13 +49,11 @@ const activeTab = computed(() => {
 
 <style scoped>
 .shell-root {
-  --tabbar-height: calc(4.5rem + env(safe-area-inset-bottom));
+  --tabbar-height: calc(3.5rem + env(safe-area-inset-bottom));
   min-height: 100vh;
   display: flex;
   flex-direction: column;
-  background:
-    radial-gradient(circle at top, color-mix(in srgb, var(--primary) 14%, transparent), transparent 34%),
-    linear-gradient(180deg, color-mix(in srgb, var(--background) 92%, white), var(--background));
+  background: var(--background);
 }
 
 .shell-main {
@@ -71,7 +69,7 @@ const activeTab = computed(() => {
   padding-bottom: var(--tabbar-height);
   overflow-y: auto;
   scrollbar-width: thin;
-  scrollbar-color: color-mix(in srgb, var(--primary) 18%, transparent) transparent;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
   -webkit-overflow-scrolling: touch;
 }
 
@@ -85,12 +83,12 @@ const activeTab = computed(() => {
 }
 
 .shell-content::-webkit-scrollbar-thumb {
-  background: color-mix(in srgb, var(--primary) 18%, transparent);
+  background: var(--scrollbar-thumb);
   border-radius: 9999px;
 }
 
 .shell-content::-webkit-scrollbar-thumb:hover {
-  background: color-mix(in srgb, var(--primary) 30%, transparent);
+  background: var(--scrollbar-thumb-hover);
 }
 
 .tabbar {
@@ -102,33 +100,34 @@ const activeTab = computed(() => {
   display: grid;
   width: 100%;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0.5rem;
-  padding: 0.5rem 1rem calc(0.5rem + env(safe-area-inset-bottom));
-  border-top: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
-  background: color-mix(in srgb, var(--card) 94%, transparent);
-  box-shadow: var(--shadow-xl);
-  backdrop-filter: blur(18px);
+  gap: 0.25rem;
+  padding: 0.375rem 0.75rem calc(0.375rem + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--border);
+  background: var(--card);
 }
 
 .tabbar-item {
   display: flex;
-  min-height: 3.5rem;
+  min-height: 2.75rem;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 0.25rem;
-  border-radius: 1.125rem;
+  gap: 0.2rem;
+  border-radius: var(--radius);
   color: var(--muted-foreground);
+  font-size: 0.6875rem;
+  font-weight: 500;
   text-decoration: none;
-  transition: background-color 0.2s ease, color 0.2s ease, transform 0.2s ease;
+  transition: background 0.1s, color 0.1s;
 }
 
 .tabbar-item:hover {
-  transform: translateY(-1px);
+  background: var(--secondary);
+  color: var(--foreground);
 }
 
 .tabbar-item-active {
-  background: color-mix(in srgb, var(--accent) 70%, transparent);
+  background: var(--secondary);
   color: var(--foreground);
 }
 

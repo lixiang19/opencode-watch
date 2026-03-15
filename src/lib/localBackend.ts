@@ -2,6 +2,10 @@ export interface GitDirectoryStatus {
   branch: string
   dirty: boolean
   changedCount: number
+  worktreeRoot: string
+  mainWorktreeRoot: string
+  isWorktreeRoot: boolean
+  isLinkedWorktree: boolean
 }
 
 export interface LocalRuntimeStatus {

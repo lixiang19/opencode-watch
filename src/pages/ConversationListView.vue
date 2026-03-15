@@ -54,7 +54,6 @@ function formatSessionDirectory(directory?: string | null) {
 }
 
 function openConversation(sessionId: string) {
-  app.clearSessionListBadges(sessionId)
   void router.push({ name: 'session', params: { sessionId } })
 }
 
@@ -272,7 +271,7 @@ watch(
   top: 0;
   z-index: 10;
   background: var(--background);
-  border-bottom: 0.5px solid color-mix(in srgb, var(--border) 40%, transparent);
+  border-bottom: 1px solid var(--border);
 }
 
 .header-title {
@@ -289,12 +288,13 @@ watch(
 }
 
 .count-badge {
-  font-size: 0.75rem;
-  background: var(--muted);
+  font-size: 0.72rem;
+  background: var(--secondary);
   color: var(--muted-foreground);
-  padding: 0.125rem 0.5rem;
-  border-radius: 999px;
+  padding: 0.1rem 0.4rem;
+  border-radius: 9999px;
   font-weight: 500;
+  border: 1px solid var(--border);
 }
 
 .conversations-content {
@@ -302,7 +302,7 @@ watch(
   padding: 0;
   overflow-y: auto;
   scrollbar-width: thin;
-  scrollbar-color: color-mix(in srgb, var(--primary) 22%, transparent) transparent;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
   -webkit-overflow-scrolling: touch;
 }
 
@@ -316,12 +316,12 @@ watch(
 }
 
 .conversations-content::-webkit-scrollbar-thumb {
-  background: color-mix(in srgb, var(--primary) 22%, transparent);
+  background: var(--scrollbar-thumb);
   border-radius: 9999px;
 }
 
 .conversations-content::-webkit-scrollbar-thumb:hover {
-  background: color-mix(in srgb, var(--primary) 34%, transparent);
+  background: var(--scrollbar-thumb-hover);
 }
 
 .sessions-list {
@@ -336,28 +336,16 @@ watch(
   display: flex;
   align-items: center;
   gap: 0.875rem;
-  padding: 0.875rem 1rem;
+  padding: 0.75rem 1rem;
   cursor: pointer;
-  transition: background-color 0.15s ease;
-  border-bottom: 0.5px solid color-mix(in srgb, var(--border) 40%, transparent);
+  transition: background 0.1s;
+  border-bottom: 1px solid var(--border);
 }
 
 .session-item-worktree {
   position: relative;
-  background:
-    linear-gradient(90deg, color-mix(in srgb, var(--primary) 11%, transparent), transparent 24%),
-    color-mix(in srgb, var(--card) 88%, transparent);
-}
-
-.session-item-worktree::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 0.7rem;
-  bottom: 0.7rem;
-  width: 0.24rem;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--primary) 82%, var(--foreground));
+  border-left: 2px solid color-mix(in srgb, var(--primary) 50%, transparent);
+  padding-left: calc(1rem - 2px);
 }
 
 .session-item:last-child {
@@ -365,13 +353,11 @@ watch(
 }
 
 .session-item:hover {
-  background-color: color-mix(in srgb, var(--accent) 8%, transparent);
+  background: var(--secondary);
 }
 
 .session-item-worktree:hover {
-  background:
-    linear-gradient(90deg, color-mix(in srgb, var(--primary) 17%, transparent), transparent 28%),
-    color-mix(in srgb, var(--accent) 22%, transparent);
+  background: var(--secondary);
 }
 
 .session-avatar-box {
@@ -405,23 +391,24 @@ watch(
 }
 
 .avatar-circle {
-  --session-icon-accent: var(--primary);
-  width: 3rem;
-  height: 3rem;
-  border-radius: 0.75rem;
-  background: var(--session-icon-accent);
-  color: var(--primary-foreground);
+  --session-icon-accent: var(--muted-foreground);
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--session-icon-accent) 18%, var(--secondary));
+  color: var(--session-icon-accent);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 1.125rem;
+  font-size: 0.875rem;
   font-weight: 600;
   overflow: hidden;
-  /* 聊天软件风格：更清爽的头像，不带过多阴影 */
+  border: 1px solid var(--border);
+  flex-shrink: 0;
 }
 
 .avatar-circle-worktree {
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 24%, transparent);
+  border-color: color-mix(in srgb, var(--primary) 40%, var(--border));
 }
 
 .avatar-image {
@@ -464,11 +451,13 @@ watch(
 
 .worktree-badge {
   flex-shrink: 0;
-  font-size: 0.64rem;
-  padding: 0.1rem 0.38rem;
-  background: color-mix(in srgb, var(--primary) 16%, transparent);
-  color: color-mix(in srgb, var(--primary) 78%, var(--foreground));
-  border: 1px solid color-mix(in srgb, var(--primary) 24%, transparent);
+  font-size: 0.6rem;
+  padding: 0.05rem 0.3rem;
+  background: var(--secondary);
+  color: var(--muted-foreground);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font-family: var(--font-mono);
 }
 
 .session-time {
@@ -563,14 +552,16 @@ watch(
 }
 
 .hero-icon {
-  width: 5rem;
-  height: 5rem;
-  background: var(--muted);
-  border-radius: 1.5rem;
+  width: 3.5rem;
+  height: 3.5rem;
+  background: var(--secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-bottom: 2rem;
+  margin-bottom: 1.5rem;
+  color: var(--muted-foreground);
 }
 
 .empty-hero h2 {

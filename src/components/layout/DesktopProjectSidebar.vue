@@ -6,7 +6,7 @@ import { FolderOpenDot, GitBranchPlus, LoaderCircle, MessageCirclePlus, Settings
 import Button from '@/components/ui/button/Button.vue'
 import WorktreeCreateDialog from '@/components/chat/WorktreeCreateDialog.vue'
 import { PROJECT_SESSION_PAGE_SIZE } from '@/composables/useOpencodeApp/constants'
-import { getDirectoryName, getProjectIdentityKey, normalizeDirectory } from '@/composables/useOpencodeApp/helpers'
+import { getProjectIdentityKey, normalizeDirectory } from '@/composables/useOpencodeApp/helpers'
 import { getSessionWorkingInfo } from '@/composables/useOpencodeApp/messages'
 import { formatRelativeTime } from '@/lib/format'
 import { useOpencodeStore } from '@/stores/opencode'
@@ -64,7 +64,6 @@ const activeSessionIds = computed(() => new Set(props.openSessionIds))
 const projectGroups = computed<ProjectSessionGroup[]>(() => {
   const groups = new Map<string, ProjectSessionGroup>()
   const unboundSessions: SessionRecord[] = []
-  const projectById = new Map(app.projects.map((project) => [project.projectId || '', project] as const))
 
   for (const project of app.projects) {
     const key = getProjectIdentityKey(project.projectId, project.directory)
@@ -81,32 +80,26 @@ const projectGroups = computed<ProjectSessionGroup[]>(() => {
   }
 
   for (const session of app.sessions) {
-    const sessionDirectory = normalizeDirectory(session.directory)
-    if (!sessionDirectory) {
+    const grouping = app.getSessionProjectGrouping(session)
+    if (!grouping?.directory) {
       unboundSessions.push(session)
       continue
     }
 
-    const rootDirectory = normalizeDirectory(
-      session.project?.worktree ||
-        projectById.get(session.projectId || session.project?.id || '')?.directory ||
-        sessionDirectory
-    )
-    const key = getProjectIdentityKey(session.projectId || session.project?.id || '', rootDirectory || sessionDirectory)
-    const existing = groups.get(key)
+    const existing = groups.get(grouping.key)
     const updatedAt = session.time.updated || session.time.created || 0
 
     if (existing) {
       existing.sessions.push(session)
       existing.lastUpdated = Math.max(existing.lastUpdated, updatedAt)
       existing.sessionCount = Math.max(existing.sessionCount, existing.sessions.length)
-      existing.icon = existing.icon || session.project?.icon
+      existing.icon = existing.icon || grouping.icon
     } else {
-      groups.set(key, {
-        key,
-        name: session.project?.name || getDirectoryName(rootDirectory || sessionDirectory),
-        directory: rootDirectory || sessionDirectory,
-        icon: session.project?.icon,
+      groups.set(grouping.key, {
+        key: grouping.key,
+        name: grouping.name,
+        directory: grouping.directory,
+        icon: grouping.icon,
         lastUpdated: updatedAt,
         sessionCount: 1,
         sessions: [session]
@@ -146,7 +139,11 @@ function syncExpandedProjects() {
   }
 
   if (!nextKeys.length && projectGroups.value.length) {
-    nextKeys.push(projectGroups.value[0].key)
+    const activeGroup = projectGroups.value.find((group) => {
+      return group.sessions.some((session) => activeSessionIds.value.has(session.id))
+    })
+
+    nextKeys.push(activeGroup?.key || projectGroups.value[0].key)
   }
 
   expandedProjectKeys.value = nextKeys
@@ -201,7 +198,6 @@ function toggleProject(group: ProjectSessionGroup) {
 }
 
 function openSession(sessionId: string) {
-  app.clearSessionListBadges(sessionId)
   emit('open-session', sessionId)
 }
 

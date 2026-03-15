@@ -47,6 +47,7 @@ import { createPwaManager } from '@/composables/useOpencodeApp/pwa'
 import { createSessionActions } from '@/composables/useOpencodeApp/sessionActions'
 import { createSessionStateManager } from '@/composables/useOpencodeApp/sessionState'
 import {
+  getGitDirectoryStatus,
   getAdminSessionStatus,
   getLocalRuntimeStatus,
   loginAdminSession,
@@ -54,6 +55,7 @@ import {
   restartManagedOpencode,
   setLocalBackendCsrfToken,
   type AdminSessionStatus,
+  type GitDirectoryStatus,
   type LocalRuntimeStatus
 } from '@/lib/localBackend'
 import {
@@ -87,6 +89,17 @@ import type {
 } from '@/composables/useOpencodeApp/types'
 
 type OpencodeClient = ReturnType<typeof createOpencodeClient>
+
+interface SessionProjectGrouping {
+  key: string
+  directory: string
+  name: string
+  projectId?: string
+  icon?: ProjectIconRecord
+  isWorktree: boolean
+  rootDirectory: string
+  worktreeDirectory: string
+}
 
 const LOCAL_OPENCODE_PROXY_PATH = '/oc'
 const LEGACY_LOCAL_OPENCODE_URLS = new Set(['http://127.0.0.1:4096', 'http://localhost:4096'])
@@ -193,8 +206,12 @@ export function useOpencodeApp() {
   let activeChatOptionsRequestId = 0
   const chatOptionsCache = new Map<string, ChatOptionsSnapshot>()
   const chatOptionsRequests = new Map<string, Promise<ChatOptionsSnapshot>>()
+  let globalCommandsCache: OpencodeCommand[] | null = null
+  let globalCommandsRequest: Promise<OpencodeCommand[]> | null = null
   const worktreeBranchState = ref<Record<string, { branch: string; loading: boolean; error: string }>>({})
   const worktreeBranchRequests = new Map<string, Promise<string>>()
+  const gitDirectoryState = ref<Record<string, { status: GitDirectoryStatus | null; loading: boolean; error: string }>>({})
+  const gitDirectoryRequests = new Map<string, Promise<GitDirectoryStatus>>()
 
   const hasAuthCredentials = computed(() => Boolean(username.value.trim()) && Boolean(password.value.trim()))
   const authGateMode = computed<'admin' | 'opencode' | null>(() => {
@@ -314,10 +331,81 @@ export function useOpencodeApp() {
     suppressedChatOptionLoadKey = getChatOptionsCacheKey(directory)
   }
 
+  function getProjectCatalogEntry(projectId?: string | null) {
+    const normalizedProjectId = projectId?.trim() || ''
+    if (!normalizedProjectId) {
+      return null
+    }
+
+    return projectCatalog.value.find((project) => project.projectId === normalizedProjectId) ?? null
+  }
+
+  function getSessionProjectRootCandidate(session?: SessionRecord | null) {
+    if (!session) {
+      return ''
+    }
+
+    const projectId = session.projectId || session.project?.id || ''
+    const projectMatch = getProjectCatalogEntry(projectId)
+    return normalizeDirectory(session.project?.worktree || projectMatch?.directory || session.directory)
+  }
+
+  function getCachedGitDirectoryStatus(directory?: string | null) {
+    const normalizedDirectory = normalizeDirectory(directory)
+    if (!normalizedDirectory) {
+      return null
+    }
+
+    return gitDirectoryState.value[normalizedDirectory]?.status ?? null
+  }
+
+  function isLinkedWorktreeRoot(status?: GitDirectoryStatus | null) {
+    return Boolean(status?.isLinkedWorktree && status?.isWorktreeRoot && normalizeDirectory(status.mainWorktreeRoot))
+  }
+
+  function getSessionProjectGrouping(session?: SessionRecord | null): SessionProjectGrouping | null {
+    if (!session) {
+      return null
+    }
+
+    const sessionDirectory = normalizeDirectory(session.directory)
+    if (!sessionDirectory) {
+      return null
+    }
+
+    const projectId = session.projectId || session.project?.id || ''
+    const rootCandidate = getSessionProjectRootCandidate(session)
+    const status = getCachedGitDirectoryStatus(sessionDirectory)
+    const linkedWorktree = isLinkedWorktreeRoot(status)
+    const sessionMatchesProjectRoot = Boolean(rootCandidate && sessionDirectory === rootCandidate)
+    const rootDirectory = linkedWorktree
+      ? normalizeDirectory(status?.mainWorktreeRoot || rootCandidate || sessionDirectory)
+      : sessionMatchesProjectRoot
+        ? rootCandidate
+        : ''
+    const groupDirectory = rootDirectory || sessionDirectory
+    const key = linkedWorktree
+      ? getProjectIdentityKey(projectId, groupDirectory)
+      : sessionMatchesProjectRoot
+        ? getProjectIdentityKey(projectId, groupDirectory)
+        : getProjectIdentityKey('', sessionDirectory)
+    const useProjectMeta = linkedWorktree || sessionMatchesProjectRoot
+
+    return {
+      key,
+      directory: groupDirectory,
+      name: useProjectMeta ? session.project?.name || getDirectoryName(groupDirectory) : getDirectoryName(sessionDirectory),
+      projectId: useProjectMeta ? projectId : '',
+      icon: useProjectMeta ? session.project?.icon : undefined,
+      isWorktree: linkedWorktree,
+      rootDirectory: linkedWorktree ? groupDirectory : '',
+      worktreeDirectory: linkedWorktree ? sessionDirectory : ''
+    }
+  }
+
   const projects = computed<ProjectRecord[]>(() => {
     const cutoff = Date.now() - RECENT_PROJECT_WINDOW
     const groups = new Map<string, ProjectRecord>()
-    const projectLookup = new Map(projectCatalog.value.map((project) => [project.projectId, project] as const))
 
     for (const project of projectCatalog.value) {
       groups.set(getProjectIdentityKey(project.projectId, project.directory), {
@@ -332,29 +420,27 @@ export function useOpencodeApp() {
     }
 
     for (const session of sessions.value) {
-      const directory = normalizeDirectory(session.directory)
-      if (!directory) {
+      const grouping = getSessionProjectGrouping(session)
+      if (!grouping) {
         continue
       }
 
-      const projectId = session.projectId || session.project?.id || ''
-      const rootDirectory = normalizeDirectory(session.project?.worktree || projectLookup.get(projectId)?.directory || directory)
-      const existing = groups.get(getProjectIdentityKey(projectId, rootDirectory || directory))
+      const existing = groups.get(grouping.key)
       const updated = session.time?.updated ?? session.time?.created ?? 0
       if (existing) {
-        existing.projectId = existing.projectId || session.projectId || session.project?.id
-        existing.icon = existing.icon || session.project?.icon
+        existing.projectId = existing.projectId || grouping.projectId
+        existing.icon = existing.icon || grouping.icon
         existing.sessionCount += 1
         existing.lastUpdated = Math.max(existing.lastUpdated, updated)
         if (existing.source !== 'manual') {
           existing.source = 'session'
         }
       } else {
-        groups.set(getProjectIdentityKey(projectId, rootDirectory || directory), {
-          projectId: session.projectId || session.project?.id,
-          directory: rootDirectory || directory,
-          name: session.project?.name || getDirectoryName(rootDirectory || directory),
-          icon: session.project?.icon,
+        groups.set(grouping.key, {
+          projectId: grouping.projectId,
+          directory: grouping.directory,
+          name: grouping.name,
+          icon: grouping.icon,
           lastUpdated: updated,
           sessionCount: 1,
           source: 'session'
@@ -411,14 +497,80 @@ export function useOpencodeApp() {
     }
   }
 
-  function resolveSessionRootDirectory(session?: SessionRecord | null) {
-    if (!session) {
-      return ''
+  async function ensureGitDirectoryStatus(directory?: string | null) {
+    const normalizedDirectory = normalizeDirectory(directory)
+    if (!normalizedDirectory) {
+      return null
     }
 
-    const projectId = session.projectId || session.project?.id || ''
-    const projectMatch = projectId ? projectCatalog.value.find((item) => item.projectId === projectId) : null
-    return normalizeDirectory(session.project?.worktree || projectMatch?.directory || session.directory)
+    const cached = gitDirectoryState.value[normalizedDirectory]
+    if (cached?.status) {
+      return cached.status
+    }
+
+    const pending = gitDirectoryRequests.get(normalizedDirectory)
+    if (pending) {
+      return pending
+    }
+
+    gitDirectoryState.value = {
+      ...gitDirectoryState.value,
+      [normalizedDirectory]: {
+        status: cached?.status ?? null,
+        loading: true,
+        error: ''
+      }
+    }
+
+    const request = getGitDirectoryStatus(normalizedDirectory)
+      .then((status) => {
+        gitDirectoryState.value = {
+          ...gitDirectoryState.value,
+          [normalizedDirectory]: {
+            status,
+            loading: false,
+            error: ''
+          }
+        }
+        return status
+      })
+      .catch((error) => {
+        gitDirectoryState.value = {
+          ...gitDirectoryState.value,
+          [normalizedDirectory]: {
+            status: null,
+            loading: false,
+            error: parseError(error)
+          }
+        }
+        throw error
+      })
+      .finally(() => {
+        gitDirectoryRequests.delete(normalizedDirectory)
+      })
+
+    gitDirectoryRequests.set(normalizedDirectory, request)
+    return request
+  }
+
+  async function preloadSessionGitStatuses(sessionList: SessionRecord[]) {
+    const directories = Array.from(new Set(sessionList
+      .map((session) => {
+        const sessionDirectory = normalizeDirectory(session.directory)
+        if (!sessionDirectory) {
+          return ''
+        }
+
+        const rootCandidate = getSessionProjectRootCandidate(session)
+        return sessionDirectory !== rootCandidate ? sessionDirectory : ''
+      })
+      .filter(Boolean)))
+
+    if (!directories.length) {
+      return
+    }
+
+    await Promise.allSettled(directories.map((directory) => ensureGitDirectoryStatus(directory)))
   }
 
   async function ensureWorktreeBranch(directory?: string | null) {
@@ -482,12 +634,13 @@ export function useOpencodeApp() {
 
   function getSessionWorktreeInfo(sessionId: string): SessionWorktreeInfo | null {
     const session = sessions.value.find((item) => item.id === sessionId) ?? null
-    if (!isWorktreeSession(session)) {
+    const grouping = getSessionProjectGrouping(session)
+    if (!grouping?.isWorktree) {
       return null
     }
 
-    const worktreeDirectory = normalizeDirectory(session?.directory)
-    const rootDirectory = resolveSessionRootDirectory(session)
+    const worktreeDirectory = grouping.worktreeDirectory
+    const rootDirectory = grouping.rootDirectory
     if (!session || !worktreeDirectory || !rootDirectory) {
       return null
     }
@@ -509,16 +662,21 @@ export function useOpencodeApp() {
   }
 
   function isWorktreeSession(session?: SessionRecord | null) {
-    if (!session) {
-      return false
-    }
-
-    const worktreeDirectory = normalizeDirectory(session.directory)
-    const rootDirectory = resolveSessionRootDirectory(session)
-    return Boolean(worktreeDirectory && rootDirectory && worktreeDirectory !== rootDirectory)
+    return Boolean(getSessionProjectGrouping(session)?.isWorktree)
   }
 
   async function ensureSessionWorktreeInfo(sessionId: string) {
+    const session = sessions.value.find((item) => item.id === sessionId) ?? null
+    if (!session) {
+      return null
+    }
+
+    try {
+      await ensureGitDirectoryStatus(session.directory)
+    } catch {
+      return null
+    }
+
     const info = getSessionWorktreeInfo(sessionId)
     if (!info) {
       return null
@@ -657,11 +815,15 @@ export function useOpencodeApp() {
     mobileSessionCacheOrder.splice(0, mobileSessionCacheOrder.length)
     chatOptionsCache.clear()
     chatOptionsRequests.clear()
+    globalCommandsCache = null
+    globalCommandsRequest = null
     preloadHomeDataRequest = null
     suppressedChatOptionLoadKey = ''
     activeChatOptionsRequestId = 0
     worktreeBranchRequests.clear()
     worktreeBranchState.value = {}
+    gitDirectoryRequests.clear()
+    gitDirectoryState.value = {}
     availableAgents.value = []
     availableCommands.value = []
     availableModels.value = []
@@ -785,25 +947,45 @@ export function useOpencodeApp() {
     const normalizedDirectory = normalizeDirectory(directory)
     const currentClient = getClient(normalizedDirectory)
     const params = normalizedDirectory ? { directory: normalizedDirectory } : undefined
-    const [{ data: providerData }, { data: agentData }, { data: scopedCommandData }, { data: globalCommandData }, { data: skillData }] =
-      await Promise.all([
-        currentClient.config.providers(params),
-        currentClient.app.agents(params),
-        currentClient.command.list(params),
-        currentClient.command.list(),
-        currentClient.app.skills(params)
-      ])
+    const [{ data: providerData }, { data: agentData }, globalCommandData, { data: skillData }] = await Promise.all([
+      currentClient.config.providers(params),
+      currentClient.app.agents(params),
+      ensureGlobalCommands(),
+      currentClient.app.skills(params)
+    ])
 
     return {
       models: buildModelCatalog((providerData ?? {}) as ConfigProvidersResponse),
       defaultModelKey: resolveDefaultModelKey((providerData ?? {}) as ConfigProvidersResponse),
       agents: buildAgentCatalog((agentData ?? []) as AgentInfo[]),
       commands: buildCommandCatalog(
-        (scopedCommandData ?? []) as OpencodeCommand[],
-        (globalCommandData ?? []) as OpencodeCommand[],
+        [],
+        globalCommandData,
         (skillData ?? []) as SkillInfo[]
       )
     } satisfies ChatOptionsSnapshot
+  }
+
+  async function ensureGlobalCommands() {
+    if (globalCommandsCache) {
+      return globalCommandsCache
+    }
+
+    if (globalCommandsRequest) {
+      return globalCommandsRequest
+    }
+
+    globalCommandsRequest = getClient()
+      .command.list()
+      .then(({ data }) => {
+        globalCommandsCache = (data ?? []) as OpencodeCommand[]
+        return globalCommandsCache
+      })
+      .finally(() => {
+        globalCommandsRequest = null
+      })
+
+    return globalCommandsRequest
   }
 
   async function ensureChatOptionsSnapshot(directory?: string) {
@@ -1113,6 +1295,7 @@ export function useOpencodeApp() {
         limit: PROJECT_SESSION_PAGE_SIZE
       })).filter((session) => !session.parentID)
 
+      await preloadSessionGitStatuses(nextSessions)
       mergeSessions(nextSessions)
       preloadChatOptions([normalizedDirectory, ...nextSessions.slice(0, CHAT_OPTIONS_PRELOAD_SESSION_LIMIT).map((session) => session.directory ?? '')])
       return nextSessions
@@ -1199,6 +1382,7 @@ export function useOpencodeApp() {
           .filter((project) => Boolean(project.directory))
       }
 
+      await preloadSessionGitStatuses(nextSessions)
       syncSessionCollections(nextSessions)
 
       const currentSessionExists = nextSessions.some((session) => session.id === selectedSessionId.value)
@@ -1701,6 +1885,7 @@ export function useOpencodeApp() {
     connectionStateLabel,
     canCreateSession,
     ensureSessionWorktreeInfo,
+    getSessionProjectGrouping,
     getSessionWorktreeInfo,
     isWorktreeSession,
     historyMessageLimit,

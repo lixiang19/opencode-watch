@@ -2,7 +2,6 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { LoaderCircle } from 'lucide-vue-next'
 
-import Badge from '@/components/ui/badge/Badge.vue'
 import MessageBubble from '@/components/chat/MessageBubble.vue'
 import { formatPathTail } from '@/composables/useOpencodeApp/helpers'
 import { isRenderableMessage } from '@/composables/useOpencodeApp/messages'
@@ -22,6 +21,11 @@ const props = withDefaults(
     historyLimit?: number
     loadingOlder?: boolean
     embedded?: boolean
+    badges?: Array<{
+      key: string
+      label: string
+      tone: 'accent' | 'success'
+    }>
     emptyText?: string
     workingInfo?: SessionWorkingInfo | null
   }>(),
@@ -34,6 +38,7 @@ const props = withDefaults(
     historyLimit: 0,
     loadingOlder: false,
     embedded: false,
+    badges: () => [],
     emptyText: '还没有消息',
     workingInfo: null
   }
@@ -83,6 +88,7 @@ const renderableMessages = computed(() => messageAnalysis.value.renderableMessag
 const activityItems = computed(() => messageAnalysis.value.activityItems)
 const latestActivityItem = computed(() => messageAnalysis.value.latestActivityItem)
 const patchFiles = computed(() => messageAnalysis.value.patchFiles)
+const headerBadges = computed(() => props.badges ?? [])
 
 function clipActivityText(input: string, limit = 72) {
   const text = input.trim().replace(/\s+/g, ' ')
@@ -234,13 +240,23 @@ onBeforeUnmount(() => {
         <div class="topbar-center">
           <div class="topbar-session-name">{{ title || '对话详情' }}</div>
           <div class="topbar-project-name">{{ projectName || '未绑定项目' }}</div>
+          <div v-if="headerBadges.length || busy" class="topbar-status-row">
+            <span
+              v-for="badge in headerBadges"
+              :key="badge.key"
+              class="topbar-chip"
+              :class="badge.tone === 'success' ? 'topbar-chip-success' : 'topbar-chip-accent'"
+            >
+              {{ badge.label }}
+            </span>
+            <span v-if="busy" class="topbar-chip topbar-chip-busy">
+              <LoaderCircle class="h-3 w-3 animate-spin" />
+              处理中
+            </span>
+          </div>
         </div>
 
         <div class="topbar-right">
-          <Badge v-if="busy" tone="accent" class="status-badge">
-            <LoaderCircle class="h-3 w-3 animate-spin" />
-            处理中
-          </Badge>
           <span class="connection-pill" :class="connected ? 'pill-connected' : 'pill-disconnected'">
             <span class="connection-dot" />
             {{ connected ? '已连接' : '未连接' }}
@@ -361,10 +377,12 @@ onBeforeUnmount(() => {
   gap: 0.75rem;
   padding: 0.5rem 1rem;
   border-bottom: 1px solid var(--border);
+  min-width: 0;
+  overflow: hidden;
 }
 
 .chat-working-banner-running {
-  background: color-mix(in srgb, var(--primary) 8%, var(--card));
+  background: rgba(59, 130, 246, 0.08);
 }
 
 .chat-working-banner-waiting {
@@ -379,7 +397,7 @@ onBeforeUnmount(() => {
   place-items: center;
   border-radius: 999px;
   background: color-mix(in srgb, var(--background) 82%, transparent);
-  color: var(--primary);
+  color: #2563eb;
 }
 
 .chat-working-banner-waiting .chat-working-banner-icon {
@@ -387,28 +405,38 @@ onBeforeUnmount(() => {
 }
 
 .chat-working-banner-copy {
+  flex: 1 1 auto;
   min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 0.125rem;
+  overflow: hidden;
 }
 
 .chat-working-banner-copy strong,
 .chat-working-banner-copy span {
+  display: block;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .chat-working-banner-copy strong {
   color: var(--foreground);
   font-size: 0.76rem;
   font-weight: 700;
+  white-space: nowrap;
 }
 
 .chat-working-banner-copy span {
   color: var(--muted-foreground);
   font-size: 0.7rem;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
 }
 
 .topbar-leading {
@@ -441,18 +469,50 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
+.topbar-status-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.45rem;
+}
+
+.topbar-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  min-height: 1.35rem;
+  padding: 0.16rem 0.45rem;
+  border: 1px solid transparent;
+  border-radius: 0.45rem;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.topbar-chip-success {
+  border-color: rgba(5, 150, 105, 0.18);
+  background: rgba(16, 185, 129, 0.12);
+  color: #059669;
+}
+
+.topbar-chip-accent {
+  border-color: rgba(217, 119, 6, 0.18);
+  background: rgba(245, 158, 11, 0.12);
+  color: #d97706;
+}
+
+.topbar-chip-busy {
+  border-color: rgba(37, 99, 235, 0.18);
+  background: rgba(59, 130, 246, 0.13);
+  color: #2563eb;
+}
+
 .topbar-right {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-}
-
-.status-badge {
-  font-size: 0.6875rem;
-  padding: 0.1875rem 0.5rem;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
 }
 
 .connection-pill {
@@ -468,8 +528,8 @@ onBeforeUnmount(() => {
 }
 
 .pill-connected {
-  background: color-mix(in srgb, var(--primary) 12%, transparent);
-  color: var(--primary);
+  background: rgba(16, 185, 129, 0.12);
+  color: #059669;
 }
 
 .pill-disconnected {

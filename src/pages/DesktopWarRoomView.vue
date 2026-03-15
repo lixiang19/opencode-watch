@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
-import { FolderSync, LoaderCircle, Sparkles, X } from 'lucide-vue-next'
+import { FolderSync, LoaderCircle, X } from 'lucide-vue-next'
 
 import Button from '@/components/ui/button/Button.vue'
 import ChatComposer from '@/components/chat/ChatComposer.vue'
@@ -79,6 +79,10 @@ function getPanelWorktreeInfo(sessionId: string) {
   return app.getSessionWorktreeInfo(sessionId)
 }
 
+function getPanelHeaderBadges(sessionId: string) {
+  return app.getSessionListBadges(sessionId)
+}
+
 async function openNewSessionPanel(directory: string) {
   const normalizedDirectory = normalizeDirectory(directory)
   if (!normalizedDirectory) {
@@ -102,7 +106,6 @@ async function openPanel(sessionId: string) {
     return
   }
 
-  app.clearSessionListBadges(sessionId)
   const isNewPanel = !openPanelIds.value.includes(sessionId)
   const hasUsableState = Boolean(getDesktopSessionState(sessionId) && !getDesktopSessionState(sessionId)?.lastError)
 
@@ -187,15 +190,10 @@ watch(
 
 <template>
   <div class="desktop-page vercel-theme">
-      <div class="desktop-note">
-        <Sparkles class="h-4 w-4" />
-        <span>PC 左侧改成项目树，只在项目下面展示历史对话。</span>
-      </div>
-
-      <div class="desktop-shell">
-        <aside class="desktop-sidebar">
-          <DesktopProjectSidebar :open-session-ids="openPanelIds" @open-session="openPanel" @open-new-session="openNewSessionPanel" />
-        </aside>
+    <div class="desktop-shell">
+      <aside class="desktop-sidebar">
+        <DesktopProjectSidebar :open-session-ids="openPanelIds" @open-session="openPanel" @open-new-session="openNewSessionPanel" />
+      </aside>
 
       <main class="desktop-chat-stage">
         <div v-if="openPanels.length" class="chat-grid soft-scrollbar">
@@ -233,6 +231,7 @@ watch(
                 embedded
                 :title="panel.session.title || '未命名对话'"
                 :project-name="formatSessionDirectory(panel.session.directory)"
+                :badges="getPanelHeaderBadges(panel.id)"
                 :messages="getWindowMessages(panel.id)"
                 :connected="app.streamReady"
                 :busy="getDesktopSessionState(panel.id)?.sessionStatus === 'busy' || getDesktopSessionState(panel.id)?.isSending"
